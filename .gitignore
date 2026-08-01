@@ -1,0 +1,18 @@
+# Release archives are attached to the GitHub release object, not carried in git.
+# They are staged in release/ so the operator can upload them from one place.
+release/
+
+# Operator working notes and the source text for the in-archive README.
+# Both are staging aids, not published documentation.
+PUSH_CHECKLIST.md
+pack/
+
+# Editor and OS noise.
+*~
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python bytecode from running the reference implementation in python/.
+__pycache__/
+*.py[cod]

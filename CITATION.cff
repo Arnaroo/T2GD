@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+message: "If you use T2GD in work you publish, please cite it as below."
+title: "T2GD: transcriptome-space to genome-space BAM conversion toolkit"
+abstract: >-
+  T2GD converts alignments made against a transcriptome FASTA into genome
+  coordinates, using a GTF annotation as the map. Each transcript-space
+  alignment is lifted onto the genome, its CIGAR split at every exon
+  boundary it crosses, and an N operation inserted for each intron, so the
+  converted record is a spliced genomic alignment that genome browsers,
+  variant callers and coverage tools read correctly. The toolkit provides
+  36 subcommands around that core operation, covering inspection,
+  filtering, sorting, indexing, counting, splice-junction cataloguing,
+  plotting and validation, and ships as a single static executable that is
+  both a command line tool and a desktop application.
+type: software
+version: 1.19.0
+date-released: "2026-07-31"
+license: CC-BY-NC-ND-4.0
+repository-artifact: "https://github.com/Arnaroo/T2GD/releases/tag/v1.19.0"
+url: "https://biocodecs.org"
+authors:
+  - name: "Biocodecs"
+  - name: "Arnaroo Ribologicals"
+  - name: "COMPASS"
+contact:
+  - family-names: "Cleynen"
+    given-names: "Alice"
+    email: "alice.cleynen@cnrs.fr"
+    orcid: "https://orcid.org/0000-0001-8083-0204"
+    affiliation: "International Research Laboratory FAMSI, CNRS"
+  - family-names: "Shirokikh"
+    given-names: "Nikolay"
+    email: "nikolay.shirokikh@uwa.edu.au"
+    orcid: "https://orcid.org/0000-0001-8249-358X"
+    affiliation: "ACRTC, The University of Western Australia"
+keywords:
+  - bioinformatics
+  - RNA-seq
+  - long-read sequencing
+  - nanopore
+  - transcriptome
+  - BAM
+  - SAM
+  - coordinate conversion
+  - splice junctions
+  - genome annotation
