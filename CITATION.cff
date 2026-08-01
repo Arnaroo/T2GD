@@ -16,6 +16,14 @@ type: software
 version: 1.19.0
 date-released: "2026-07-31"
 license: CC-BY-NC-ND-4.0
+doi: 10.5281/zenodo.21744719
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.21744719
+    description: "Archived snapshot of version 1.19.0"
+  - type: doi
+    value: 10.5281/zenodo.21744718
+    description: "Concept DOI, always resolves to the latest version"
 repository-artifact: "https://github.com/Arnaroo/T2GD/releases/tag/v1.19.0"
 url: "https://biocodecs.org"
 authors:

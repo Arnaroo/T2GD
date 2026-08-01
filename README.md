@@ -4,6 +4,8 @@
 
 Version 1.19.0 "Shenlong" | Linux, macOS, Windows | no dependencies | CC BY-NC-ND 4.0
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21744718.svg)](https://doi.org/10.5281/zenodo.21744718)
+
 T2GD converts a BAM aligned against a transcriptome FASTA into a BAM in genome
 coordinates, using the GTF that defines the transcript models as the map. Each
 alignment is lifted onto the genome, its CIGAR split at every exon boundary it
