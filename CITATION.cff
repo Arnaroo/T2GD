@@ -21,12 +21,17 @@ license: CC-BY-NC-ND-4.0
 # release is published, so it cannot be written here beforehand; carrying
 # 1.19.0's would point every citation of 1.19.1 at the wrong snapshot.  The
 # concept DOI always resolves to the latest version and is correct at all
-# times.  Add the 1.19.1 snapshot DOI to `identifiers` once Zenodo issues it.
+# times, so this line does not change from release to release.  The snapshot
+# DOIs accumulate under `identifiers` below, newest first, and are added after
+# the fact once Zenodo has issued them.
 doi: 10.5281/zenodo.21744718
 identifiers:
   - type: doi
     value: 10.5281/zenodo.21744718
     description: "Concept DOI, always resolves to the latest version"
+  - type: doi
+    value: 10.5281/zenodo.22016829
+    description: "Archived snapshot of version 1.19.1"
   - type: doi
     value: 10.5281/zenodo.21744719
     description: "Archived snapshot of version 1.19.0"
