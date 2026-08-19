@@ -10,15 +10,16 @@ immediately on a machine with no network and nothing on the path.
 ## Choose an archive
 
 All five archives are attached to the
-[v1.19.0 release](https://github.com/Arnaroo/T2GD/releases/tag/v1.19.0).
+[v1.19.1 release](https://github.com/Arnaroo/T2GD/releases/tag/v1.19.1), plus a
+Windows installer described under [Windows](#windows) below.
 
 | Archive | Platform | Requirement |
 |---|---|---|
-| `t2gd-1.19.0-Shenlong-linux-x86_64-broadwell.tar.gz` | Linux x86_64 | any reasonably modern x86_64, the safe default |
-| `t2gd-1.19.0-Shenlong-linux-x86_64-znver2.tar.gz` | Linux x86_64 | AMD Zen 2 or newer |
-| `t2gd-1.19.0-Shenlong-linux-x86_64-znver4.tar.gz` | Linux x86_64 | AVX-512, so AMD Zen 4 or newer |
-| `t2gd-1.19.0-Shenlong-macos-arm64.tar.gz` | macOS | Apple Silicon M1 or newer, macOS 14 or newer |
-| `t2gd-1.19.0-Shenlong-windows-x86_64.zip` | Windows | any x86-64, Windows 10 or newer |
+| `t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz` | Linux x86_64 | any reasonably modern x86_64, the safe default |
+| `t2gd-1.19.1-Shenlong-linux-x86_64-znver2.tar.gz` | Linux x86_64 | AMD Zen 2 or newer |
+| `t2gd-1.19.1-Shenlong-linux-x86_64-znver4.tar.gz` | Linux x86_64 | AVX-512, so AMD Zen 4 or newer |
+| `t2gd-1.19.1-Shenlong-macos-arm64.tar.gz` | macOS | Apple Silicon M1 or newer, macOS 14 or newer |
+| `t2gd-1.19.1-Shenlong-windows-x86_64.zip` | Windows | any x86-64, Windows 10 or newer |
 
 **Which Linux build?** If you are not sure, take **broadwell**. It runs
 everywhere the other two do. The znver2 and znver4 builds are tuned for
@@ -59,7 +60,7 @@ so that command line work has somewhere to print.
 ## Linux
 
 ```sh
-tar xzf t2gd-1.19.0-Shenlong-linux-x86_64-broadwell.tar.gz
+tar xzf t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz
 cd linux-broadwell
 sha256sum -c SHA256SUMS
 chmod +x t2gd t2gd-cli
@@ -99,7 +100,7 @@ fault in the binary; use `t2gd-cli` for command line work.
 ## macOS
 
 ```sh
-tar xzf t2gd-1.19.0-Shenlong-macos-arm64.tar.gz
+tar xzf t2gd-1.19.1-Shenlong-macos-arm64.tar.gz
 cd macos-arm64
 shasum -a 256 -c SHA256SUMS
 xattr -dr com.apple.quarantine T2GD.app t2gd t2gd-cli
@@ -155,6 +156,20 @@ the subcommand is dispatched. `t2gd-cli` has no graphical code in it and
 needs none of this.
 
 ## Windows
+
+There are two ways in. **The ZIP is the primary one** and the rest of this
+section assumes it.
+
+`t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe` is an installer carrying the
+same files. It puts them under `Program Files`, adds Start-menu and optional
+desktop shortcuts, can add the install directory to your `PATH`, and registers
+an uninstaller. Use it if you would rather not decide where to put a folder.
+Two things to know before you do: it asks for administrator rights, and it is
+unsigned, so SmartScreen objects more loudly to it than to the ZIP — a program
+that wants elevation *and* wants to edit `PATH` is exactly the shape SmartScreen
+is built to warn about. Choose **More info**, then **Run anyway**. The ZIP needs
+no elevation at all and contains the same 916 files, so nothing is lost by
+preferring it.
 
 Unpack the ZIP and **keep the whole folder together**. `t2gd.exe` finds its
 GTK DLLs, the gdk-pixbuf loaders under `lib\` and the themes and icons
@@ -233,7 +248,7 @@ shasum -a 256 -c SHA256SUMS     # macOS
 ## Confirming the install
 
 ```sh
-t2gd-cli --version    # banner reads 1.19.0 / Shenlong
+t2gd-cli --version    # banner reads 1.19.1 / Shenlong
 t2gd-cli help         # the topic index
 ```
 

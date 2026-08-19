@@ -10,21 +10,27 @@ abstract: >-
   variant callers and coverage tools read correctly. The toolkit provides
   36 subcommands around that core operation, covering inspection,
   filtering, sorting, indexing, counting, splice-junction cataloguing,
-  plotting and validation, and ships as a single static executable that is
-  both a command line tool and a desktop application.
+  plotting and validation. It ships as two dependency-free executables, a
+  desktop application and a command line tool, the latter carrying no
+  graphical code at all so that it runs on cluster nodes and in containers.
 type: software
-version: 1.19.0
-date-released: "2026-07-31"
+version: 1.19.1
+date-released: "2026-08-09"
 license: CC-BY-NC-ND-4.0
-doi: 10.5281/zenodo.21744719
+# Concept DOI, not the version DOI.  Zenodo mints the version DOI when the
+# release is published, so it cannot be written here beforehand; carrying
+# 1.19.0's would point every citation of 1.19.1 at the wrong snapshot.  The
+# concept DOI always resolves to the latest version and is correct at all
+# times.  Add the 1.19.1 snapshot DOI to `identifiers` once Zenodo issues it.
+doi: 10.5281/zenodo.21744718
 identifiers:
-  - type: doi
-    value: 10.5281/zenodo.21744719
-    description: "Archived snapshot of version 1.19.0"
   - type: doi
     value: 10.5281/zenodo.21744718
     description: "Concept DOI, always resolves to the latest version"
-repository-artifact: "https://github.com/Arnaroo/T2GD/releases/tag/v1.19.0"
+  - type: doi
+    value: 10.5281/zenodo.21744719
+    description: "Archived snapshot of version 1.19.0"
+repository-artifact: "https://github.com/Arnaroo/T2GD/releases/tag/v1.19.1"
 url: "https://biocodecs.org"
 authors:
   - name: "Biocodecs"

@@ -1,107 +1,120 @@
-# T2GD 1.19.0 "Shenlong"
+# T2GD 1.19.1 "Shenlong"
 
-The first public release. It supersedes 1.18.0 "Fafnir" (2026-07-30), which was
-built and tested but never distributed. Fafnir appears throughout these notes as
-the reference build that 1.19.0 is checked against.
+A build-recipe release. It is built from the same source tree as 1.19.0
+"Shenlong" (2026-07-31) and produces the same records; what changed is how the
+binaries are compiled. The codename does not advance, deliberately, because a
+new codename would imply new software.
 
 T2GD converts alignments made against a transcriptome FASTA into genome
 coordinates, using a GTF annotation as the map, and ships 36 subcommands around
 that core operation. See [CHANGELOG.md](CHANGELOG.md) for what is in the
 release and [INSTALL.md](INSTALL.md) for how to install it.
 
-## What is new in 1.19.0
+**If you are running 1.19.0, nothing here requires you to change anything.**
+There is no source change, no change to the command line surface, and no change
+to any record T2GD writes. Upgrade if you want the speed.
 
-Packaging and performance. No conversion, filtering or counting logic was
-touched and **no record T2GD writes has changed**; the work is in how the
-executables are linked and presented, how fast two hot paths run, and how the
-program behaves against a low open file limit. The record-stream equivalence
-gate against 1.18.0 is reported under **Determinism across platforms** below.
+## What is new in 1.19.1
 
-The command line surface is unchanged, with one exception on Windows, noted
-below, where the command line moves to a second executable.
+Link time optimisation (`--flto=full`) is removed from the five shipping
+release recipes: `release-znver4`, `release-znver2`, `release-broadwell`,
+`release-apple` and `release-generic`. That is the whole change.
 
-**The graphical interface no longer drags a terminal behind it.** On both
-Windows and macOS, launching the GUI in the ordinary way used to open an empty
-console or terminal window alongside it. Both are gone, by different means,
-because the two platforms fail this in different ways.
+LTO had been carried since 1.15.x on the assumption that it helps. It was
+measured instead, and it does not help — it costs. The measurement was made on
+a 96-CPU dual EPYC 9474F node under exclusive, quiescence-gated allocation, on
+a 4.7 GB long-read BAM, with nine replicates per cell. Medians below; negative
+means the binary **without** LTO is faster.
 
-* **Windows** now ships two executables. A Windows program declares at link
-  time whether it owns a console and cannot answer both ways; the single
-  `t2gd.exe` of 1.18.0 answered "yes", which is where the empty black window
-  came from. `t2gd.exe` now answers "no", and the new `t2gd-cli.exe` carries
-  the console for command line work. The subsystem flag is verified in the PE
-  header, and launching `t2gd.exe` on a live Windows desktop was observed to
-  open the interface with no console window. The consequence worth knowing is
-  that `t2gd.exe --cli` has nowhere to print to; use `t2gd-cli.exe`, which sits
-  in the same folder.
-* **macOS** now ships `T2GD.app`. Finder does not launch a bare executable
-  directly. It hands it to Terminal, which is why double-clicking `t2gd`
-  produced a terminal with the interface running inside it. The bundle goes
-  through the normal launch path instead. It also locates the GTK 3 runtime
-  itself, in `/opt/homebrew/lib` or `/usr/local/lib`, and reports in a dialog
-  if it is absent, because an app launched from Finder inherits the launchd
-  environment rather than your shell's and a loader error would otherwise go
-  somewhere you could not see it.
+| op | threads | with LTO | without LTO | change |
+|---|---|---|---|---|
+| `depth` | 1 | 162.78 s | 78.57 s | -51.73% |
+| `flagstat` | 8 | 14.75 s | 11.92 s | -19.19% |
+| `view_count` | 8 | 12.59 s | 10.89 s | -13.50% |
+| `flagstat` | 1 | 39.30 s | 35.18 s | -10.48% |
+| `convert` | 8 | 68.18 s | 61.76 s | -9.42% |
+| `view_count` | 1 | 36.20 s | 32.84 s | -9.26% |
+| `convert` | 1 | 169.88 s | 154.20 s | -9.23% |
+| `filter` | 8 | 51.42 s | 46.91 s | -8.77% |
+| `sort` | 8 | 101.43 s | 95.78 s | -5.57% |
+| `depth` | 8 | 29.85 s | 28.57 s | -4.29% |
+| `sort` | 1 | 445.26 s | 443.06 s | -0.49% |
+| `filter` | 1 | 231.61 s | 233.27 s | +0.72% |
 
-**The built-in manual now matches the shipped packaging.** The *Installing
-T2GD* topic described a `t2gd-cli-static` binary and a `generic` build
-variant, neither of which was ever in a release, claimed a macOS x86_64 build
-that does not exist, and gave an unpack path that did not match the archives.
-It was rewritten from the artifacts. The topic also stated that the GTK
-dependency was optional at run time for `t2gd`; it is not, and the corrected
-text says so.
+Not one cell is meaningfully faster with LTO. The single positive number is
+inside the run-to-run spread. Four further cells are excluded from the table
+because the two builds did not run at comparable thread width, which would make
+a wall-clock comparison between them a comparison of something other than the
+code.
 
-**`depth` and `coverage` are about 3x faster.** They no longer thrash the
-garbage collector on the per-reference column window, and the integer formatter
-no longer performs a 64-bit hardware divide per digit. On a 175 MB nanopore BAM
-emitting 316 M positions, `depth -t 1` goes from 51.8 s to 17.7 s. The larger
-change is in work rather than wall clock: at `-t 8` the old build spent 215
-CPU-seconds to buy 14 % of wall time over `-t 1`, and now spends 33. Output is
-byte-for-byte identical to 1.18.0, verified across 12 fixtures by
-`{default, -a, -aa}` by `{-t 1, 4, 8}`.
+`depth` at one thread is the headline and also the least surprising result.
+`depth.d` carries a hand-written multiply-shift division workaround at lines
+1040 and 1344 that exists solely because LTO miscompiled the straightforward
+form. Removing LTO removes the reason for that workaround; the workaround is
+left in place for now, because it is correct either way and this release
+changes no source.
 
-**BAM writing is about 1.9x faster.** BGZF compression now uses libdeflate
-instead of zlib, which affects every subcommand that writes a BAM. `sort -t 8
---bgzf-threads 8 --read-threads 8` on a 175 MB BAM goes from 4.85 s to 2.42 s.
-libdeflate is statically linked; the shared library list is unchanged.
+**Correctness is gated, not assumed.** All 18 record-stream digest groups agreed
+across every build tested, with zero mismatches, on both x86-64 and Apple
+Silicon. Removing LTO changes no output. The per-release gate is reported under
+**Determinism across platforms** below.
 
-**The compressed bytes differ from 1.18.0 but the records do not.** This is the
-one change here that can be seen from outside. libdeflate and zlib both emit
-valid DEFLATE and make different, equally legal choices, so file size shifts by
-about a percent and **the direction depends on the data**: 1.2 % smaller on one
-sort output, 1.1 % larger on the demo conversion. Budget for a percent either
-way rather than for a saving. If you have pinned a checksum of a **BAM file**
-it will change; a checksum of `samtools view` output will not. Use
-`t2gd checksum`, which is content-based and order-agnostic, if you need to
-prove two BAMs hold the same records.
+**Windows is unaffected, and it is worth knowing why.** Windows has never been
+an LTO build: `release` is not defined in `dub.json`, so `dub build -b release`
+falls back to dub's own built-in recipe of `-release -O -inline`. The five build
+types this release edits are the Linux and macOS ones. The Windows executables
+therefore differ from 1.19.0 only in the version strings compiled into them.
 
-**Open file limits are handled rather than documented around.** The disk-spill
-merge opens one descriptor per spill batch, and that count scales with the
-number of batches rather than with the size of the input, so under the common
-soft limit of 1024 a convert could die at roughly 500,000 records on a file of
-only a few hundred MB. This was reported from the field. T2GD now raises its
-own soft limit to the hard limit at start-up, which is the opt-in that the
-split between a low soft limit and a high hard limit exists to allow, and is a
-no-op where the two are equal. Where the hard limit genuinely is low, raising
-the soft limit cannot help, so the merge also checks the descriptor budget
-before opening anything and fails with a message naming the knobs to change,
-rather than surfacing `Too many open files` partway through.
+### What you may notice
 
-Note that the copy of `CHANGELOG.md` inside the archives predates that last
-item and does not describe it. The behaviour is in the shipped binaries; only
-its description was late. `USAGE.md` in the repository is correct.
+* The `@PG` `VN:` field moves from `1.19.0-Shenlong` to `1.19.1-Shenlong`. This
+  is the only difference in a BAM header, and it does not affect records. Two
+  BAMs converted by 1.19.0 and 1.19.1 will not be byte-identical for that reason
+  alone; their record streams are.
+* Binary size moves, and not in the same direction on both platforms.
+
+| Binary | 1.19.0 | 1.19.1 | Change |
+|---|---:|---:|---:|
+| `linux-broadwell/t2gd` | 12,372,728 | 9,927,464 | -19.8% |
+| `linux-broadwell/t2gd-cli` | 5,495,096 | 3,778,888 | -31.2% |
+| `macos-arm64/t2gd` | 7,252,432 | 13,208,960 | +82.1% |
+| `macos-arm64/t2gd-cli` | 3,445,248 | 4,491,744 | +30.4% |
+
+The other two Linux marches move by the same proportions: `t2gd` -20.4% on
+znver4 and -19.4% on znver2, `t2gd-cli` -32.4% and -30.7%.
+
+That divergence is mostly the strip step rather than the code. Linux strips with
+`--strip-all` and discards the symbol table outright. macOS has to use
+`strip -x` and keep the global symbols, because stripping them invalidates the
+ad-hoc signature and on Apple Silicon an invalid signature is fatal. Without LTO
+far fewer symbols have been internalised, so far more of them survive `strip -x`
+— the strip removed 438 KB at 1.19.1 against 2.06 MB at 1.19.0. Unstripped, the
+two platforms agree to within half a percent, at 13.64 MB on Linux broadwell
+against 13.65 MB on macOS for the graphical build. Size is not the objective
+here and no timing conclusion follows from it in either direction.
 
 ## Artifacts
 
 | Platform | Archive | Size | Binaries |
 |---|---|---:|---|
-| Linux x86_64, znver4 | `t2gd-1.19.0-Shenlong-linux-x86_64-znver4.tar.gz` | 5,603,633 | `t2gd`, `t2gd-cli` |
-| Linux x86_64, znver2 | `t2gd-1.19.0-Shenlong-linux-x86_64-znver2.tar.gz` | 5,465,621 | `t2gd`, `t2gd-cli` |
-| Linux x86_64, broadwell | `t2gd-1.19.0-Shenlong-linux-x86_64-broadwell.tar.gz` | 5,538,852 | `t2gd`, `t2gd-cli` |
-| macOS arm64 | `t2gd-1.19.0-Shenlong-macos-arm64.tar.gz` | 6,152,835 | `T2GD.app`, `t2gd`, `t2gd-cli` |
-| Windows x86_64 | `t2gd-1.19.0-Shenlong-windows-x86_64.zip` | 27,063,486 | `t2gd.exe`, `t2gd-cli.exe` |
+| Linux x86_64, znver4 | `t2gd-1.19.1-Shenlong-linux-x86_64-znver4.tar.gz` | 4,290,601 | `t2gd`, `t2gd-cli` |
+| Linux x86_64, znver2 | `t2gd-1.19.1-Shenlong-linux-x86_64-znver2.tar.gz` | 4,237,374 | `t2gd`, `t2gd-cli` |
+| Linux x86_64, broadwell | `t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz` | 4,248,488 | `t2gd`, `t2gd-cli` |
+| macOS arm64 | `t2gd-1.19.1-Shenlong-macos-arm64.tar.gz` | 8,559,092 | `T2GD.app`, `t2gd`, `t2gd-cli` |
+| Windows x86_64 | `t2gd-1.19.1-Shenlong-windows-x86_64.zip` | 27,172,265 | `t2gd.exe`, `t2gd-cli.exe` |
+| Windows x86_64, installer | `t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe` | 19,599,036 | `t2gd.exe`, `t2gd-cli.exe` |
 
-Sizes are bytes.
+Sizes are bytes. The Linux archives are about 24 % smaller than the 1.19.0 ones
+and the macOS archive about 39 % larger, for the stripping reason given above.
+
+The Windows installer carries the same tree as the zip and is offered only as a
+convenience: it puts the program under `Program Files`, adds Start-menu and
+optional desktop shortcuts, and can put the install directory on `PATH`. It is
+smaller than the zip because it uses solid LZMA2 rather than per-entry deflate,
+not because it holds less. The one file it does not install is `SHA256SUMS`,
+which certifies the zip and has no meaning once the tree has been installed.
+Everything else matches byte for byte: 916 files, verified by comparing every
+shared path between an installed tree and the unpacked zip.
 
 **Which one.** If you are unsure, take `broadwell`; it runs everywhere the
 other two Linux builds do. `znver4` needs AVX-512, so AMD Zen 4 or newer.
@@ -113,7 +126,7 @@ Windows 10 or newer.
 `t2gd --cli <subcommand>`. `t2gd-cli` contains no graphical code at all and is
 the binary to use on HPC nodes and in containers. On macOS, use `t2gd-cli` for
 command line work: the full binary looks for GTK at startup and macOS has no
-system wide search path that finds a Homebrew install.
+system-wide search path that finds a Homebrew install.
 
 Windows ships the same pair, `t2gd.exe` and `t2gd-cli.exe`, for a different
 reason: a Windows program declares at link time whether it owns a console, so
@@ -129,11 +142,12 @@ SHA-256 of the release archives. These are also in `SHA256SUMS` alongside the
 archives.
 
 ```
-287efd1ba5e4094b8ab1dcd7e7e698696a93de4a332a13fb8f08221540c141bf  t2gd-1.19.0-Shenlong-linux-x86_64-znver4.tar.gz
-5a13c2686408c113dd0a30b3322a03c335128743aa76401e2e2b8d264020c7f1  t2gd-1.19.0-Shenlong-linux-x86_64-znver2.tar.gz
-1f0c9a0369e9db8cf48bb4a6c680194ece57c282b5a9c8f54e8bb4fe4c8f344a  t2gd-1.19.0-Shenlong-linux-x86_64-broadwell.tar.gz
-a81da462a43d62ebc8f64d56d37344622b55f059e426e60071be5493a66a59e8  t2gd-1.19.0-Shenlong-macos-arm64.tar.gz
-fa182f9139b2408a3d09107bd0d0a8aa5e22e3731304967bf9236ff422bdbc2a  t2gd-1.19.0-Shenlong-windows-x86_64.zip
+e823155f9823501577d93da1085576cc935e6d7c66557ea81f3b981a8288e0ec  t2gd-1.19.1-Shenlong-linux-x86_64-znver4.tar.gz
+c8b0728ae50c584b1bc1c196207c925d985f4d20b0ca2a8feb0b33aaec9a0744  t2gd-1.19.1-Shenlong-linux-x86_64-znver2.tar.gz
+cb0a5dd8ae7dd5fcbd780e93da887eff325a67fb32b18ab7f43a37644e34c318  t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz
+e6b97dc27102353bea3509a951a6a85ecb094da2f415511a5a698b4902ae5499  t2gd-1.19.1-Shenlong-macos-arm64.tar.gz
+ed940aa2f6d6dfc5f2c7497e55188a2c810fbd1784c860c8876d37141f064b71  t2gd-1.19.1-Shenlong-windows-x86_64.zip
+671d6b5489819a8d1e45e6f81512863426032312c0b9ff7f2130cb9973860c58  t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe
 ```
 
 Verify a download:
@@ -143,32 +157,33 @@ sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 On macOS, `shasum -a 256 -c SHA256SUMS --ignore-missing`. On Windows,
-`certutil -hashfile t2gd-1.19.0-Shenlong-windows-x86_64.zip SHA256`.
+`certutil -hashfile t2gd-1.19.1-Shenlong-windows-x86_64.zip SHA256`.
 
 SHA-256 of the executables themselves, after unpacking. Each archive also
 carries its own `SHA256SUMS`, which you can check from inside the unpacked
 folder.
 
 ```
-2e76d5048a23a18730655367bc212582a12be255ebb8a024783efb15166b8468  linux-znver4/t2gd
-5cbcaad8c4399f7f8de7da35e40db50d17a80a6053700b90e44e6918a8244767  linux-znver4/t2gd-cli
-9d80ea905a0cb10423f7838c6af8c334e828d92f8a7cd2d95f0d946384957068  linux-znver2/t2gd
-d8faaf504fd98bccd404c136511989425681b7023a4321a128b1d8f0f17222e0  linux-znver2/t2gd-cli
-598ff57f71f0921101fb7a4e62dfe3fac3e75b53cdff10c59dad44f929eeb6d4  linux-broadwell/t2gd
-154d385ac7c7a122fae5603ef1a32724c312fe3dff973c0a51a962858d7e98e2  linux-broadwell/t2gd-cli
-ff62a33d42643492f3c29d26763248803647697c99c150d89366d2f20cc351d5  macos-arm64/t2gd
-a9f920f6d767eccdade0576ac89347d21279eac968f94e77caa89003de6b60a6  macos-arm64/t2gd-cli
+a1a5a6318f76ce382faf95c2d5c192d736c00e9877d0d7230ab33ba222010c06  linux-znver4/t2gd
+7cb22fc9d60b9dba26a2f0f9b25c84b6958b38e45a467e9da5dcd460eb296218  linux-znver4/t2gd-cli
+9e3ece76a7babfbfc3bd263ae153b73a06bda21cd6969d2f54e9a1bb0343188b  linux-znver2/t2gd
+951d37452987dbc7d726db48178adf152c5679c62d5f1df8f2b10741bb0d9b2d  linux-znver2/t2gd-cli
+f2283770d19b8f5d9a55eedfa4ff093408234ce108fe09e5f52f36cce007c7ed  linux-broadwell/t2gd
+5f50fe5820f4842414d573efd25704368cb32cdef1ee5f000c9f3c1820aa0a22  linux-broadwell/t2gd-cli
+0f169318f00068c800e975d1b5ef78715880ca7946edea9acafc9fa90c11ade6  macos-arm64/t2gd
+af8ed5651b504641cdf93df6f7d62788eb053acebd10a17887d86514936badf7  macos-arm64/t2gd-cli
 9c70c063740e38af9fdd612f8469c6289c51fa11e170ce9ca515d53e8dacfaa3  macos-arm64/T2GD.app/Contents/MacOS/T2GD
-8db8f0ef286c1f4a866193a66f5d5d6aaae19febf48728a2925c8d775ce6d2fd  macos-arm64/T2GD.app/Contents/MacOS/t2gd-bin
-cd86de8249590d97552000e2236ad45ae778e4aad4a4b3dcc384b52152bfe7be  windows-x64/t2gd.exe
-6fbe44721888a66446078e98a5c44d63f70b5ff6fb599a5ccffd082bb6824598  windows-x64/t2gd-cli.exe
+5a47b56f73e0915d59adfc1388e3ebc67b88ec01904e957279d62963a7e63750  macos-arm64/T2GD.app/Contents/MacOS/t2gd-bin
+f86dcab12fc41c0b3b3263eee28f949551ad8e821973c63c8304b474861faaeb  windows-x64/t2gd.exe
+3d473667b47d41a89cfa6ed0a3debb853eacf978ab14e90a4fddaa388eff5a74  windows-x64/t2gd-cli.exe
 ```
 
 Two of those lines deserve a note. `T2GD.app/Contents/MacOS/t2gd-bin` is the
 same build as the bare `macos-arm64/t2gd` but does not hash the same and is 16
 bytes larger, because ad-hoc signing the bundle rewrote the signature blob
 inside it. `T2GD.app/Contents/MacOS/T2GD` is not a build at all; it is the
-small launcher script that finds the GTK runtime and then execs `t2gd-bin`.
+small launcher script that finds the GTK runtime and then execs `t2gd-bin`, and
+it is unchanged from 1.19.0, which is why its hash is the same in both releases.
 
 ## What is in each archive
 
@@ -183,12 +198,12 @@ Every archive contains the binaries, plus:
 | `SHA256SUMS` | Checksums for the binaries and the documents listed above. |
 
 `SHA256SUMS` covers the executables and the four documents. On Windows it does
-not cover the bundled GTK runtime, which is 897 further files; those are
+not cover the bundled GTK runtime, which is 910 further files; those are
 covered by the checksum of the archive as a whole.
 
 The Windows archive additionally carries that runtime: 47 DLLs beside
-`t2gd.exe`, the gdk-pixbuf loaders under `lib\` (15 files), and themes and
-icons under `share\` (834 files), 903 files in the archive altogether. Nothing
+`t2gd.exe`, the gdk-pixbuf loaders under `lib\` (17 files), and themes and
+icons under `share\` (846 files), 917 files in the archive altogether. Nothing
 needs installing and no environment variable is required, because Windows
 searches the executable's own directory first. `t2gd-cli.exe` needs none of it
 and runs on its own.
@@ -203,13 +218,14 @@ is installed alongside, so `t2gd help` works on a machine with no network.
 ## Dependencies
 
 None beyond the platform system libraries. The D runtime and libdeflate are
-linked in.
+linked in. Removing LTO does not change this; the link record is identical to
+1.19.0 on every platform.
 
 On Linux, `readelf -d` NEEDED lists only `libz`, `libm`, `libgcc_s`, `libc` and
-`ld-linux`. On macOS, `otool -L` lists only `libz`, `libSystem` and `libobjc`,
-all from `/usr/lib`, with no Homebrew path baked in and no `LC_RPATH`. On
-Windows the import table lists only `KERNEL32.dll`, `ADVAPI32.dll` and
-`WS2_32.dll`.
+`ld-linux` — verified on all six Linux binaries in this release. On macOS,
+`otool -L` lists only `libz`, `libSystem` and `libobjc`, all from `/usr/lib`,
+with no Homebrew path baked in and no `LC_RPATH`. On Windows the import table
+lists only `KERNEL32.dll`, `ADVAPI32.dll` and `WS2_32.dll`.
 
 GTK 3 is absent from the link record on every platform, including in the full
 build, because the toolkit is loaded at startup rather than linked. That is a
@@ -221,22 +237,20 @@ all is `t2gd-cli`, which contains no graphical code.
 
 Every platform produces the same records from the same input. This is verified
 on each release by comparing the record stream checksum of the same conversion
-run on each build; the table below gives what was run for 1.19.0. A result
-therefore does not change when you move machines.
+run on each build. A result therefore does not change when you move machines.
 
-Because 1.19.0 changes no conversion code, the record stream it produces should
-match 1.18.0 exactly. That is checked rather than assumed. Two conversions were
-run under 1.19.0 and their record stream checksums compared against the values
-recorded for 1.18.0:
+Because 1.19.1 changes no conversion code, the record stream it produces must
+match 1.19.0 and 1.18.0 exactly. That is checked rather than assumed:
 
-| Reference conversion | Records | 1.18.0 | 1.19.0 |
-|---|---:|---|---|
-| Demo (`tests/demo`, GRCh38 subset) | 59,886 | `34d6da6cd0356bd924d7381a3b4b2d23` | same |
-| SUDHL8 short-read, GRCh38.114 | 5,781,316 | `0fa6ed91f920987b02b4421c40e183e8` | same |
+| Reference conversion | Records | 1.18.0 | 1.19.0 | 1.19.1 |
+|---|---:|---|---|---|
+| Demo (`tests/demo`, GRCh38 subset) | 59,886 | `34d6da6cd0356bd924d7381a3b4b2d23` | same | same |
+| Internal short-read corpus, GRCh38.114 | 5,781,316 | `0fa6ed91f920987b02b4421c40e183e8` | same | not re-run |
 
-Both match. Note that the *files* are not identical and are not meant to be:
-the `@PG` header line records the invoking command and the version that ran it,
-so a header comparison would differ by design. The gate is on records only.
+The demo gate matches. The corpus gate was not re-run for this release; see
+Known limitations. Note that the *files* are not identical and are not meant to
+be: the `@PG` header line records the invoking command and the version that ran
+it, so a header comparison would differ by design. The gate is on records only.
 
 What was run against the demo value for this release, exactly:
 
@@ -244,15 +258,39 @@ What was run against the demo value for this release, exactly:
 |---|---|---|
 | linux-znver2 | `t2gd-cli`, and `t2gd --cli` | match |
 | linux-broadwell | `t2gd-cli`, and `t2gd --cli` | match |
-| linux-broadwell, unpacked from the tarball | `t2gd-cli` | match |
-| windows-x64, under wine | `t2gd-cli.exe` | match |
 | linux-znver4 | not run, no AVX-512 on the packaging host | see Known limitations |
-| macos-arm64 | not re-run on the packaging host | carried from the build host |
+| macos-arm64 | run on the build host, 18 digest groups | match |
+| windows-x64 | `t2gd-cli.exe`, `t2gd.exe --cli`, under wine | match, see the note below the table |
 
-The Linux and Windows lines were run on the packaging host. The macOS value is
-carried from its own build host, because the packaging host is Linux and the
-macOS binaries were not rebuilt for this release, only repacked, with the
+The Linux lines were run on the packaging host, both directly and through
+`t2gd --cli` on the graphical build, giving 59,886 records and the reference
+md5 in every case. The macOS value comes from its own build host, where the
+full 18-group digest comparison was run against the LTO build before the host
+was wiped; the archive shipped here was repacked from that stage with the
 executable hashes asserted unchanged across the repack.
+
+**The Windows line needs its qualification stated plainly, because the word
+"match" on its own would claim more than was done.** The Windows binaries were
+not run on Windows by the packaging side. They were run on the packaging host
+under wine 11.15, in three configurations — `t2gd-cli.exe` at `-t 8` and at
+`-t 1`, and `t2gd.exe --cli` at `-t 8` — and all three produced 59,886 records
+and the reference md5.
+
+What that does and does not establish is worth separating. Wine is not an
+emulator: the x86-64 machine code in `t2gd-cli.exe` executes natively on this
+CPU, so everything the gate is actually aimed at — the compiler's codegen, the
+conversion arithmetic, the CIGAR and intron handling, the BGZF writer — is
+genuinely exercised, and a codegen defect would have shown up here. What wine
+substitutes is the Win32 API beneath it. So this result does not cover
+Microsoft's own implementation of file I/O, threading or the C runtime, and it
+is not a substitute for running the binary on Windows. The build operator's own
+run on the build machine is the native evidence; this is a second, independent
+check made on a different host from a different starting point, and it agrees.
+
+One incidental confirmation came out of it. The `-t 8` and `-t 1` outputs differ
+by exactly one byte in the container while the record streams are bit-identical:
+the thread count is recorded in the `@PG CL` line. That is the concrete case the
+paragraph above describes, observed rather than asserted.
 
 BGZF block boundaries can differ between a T2GD `sort` and an external sort of
 the same data while the record stream is identical. Use `t2gd checksum`, which
@@ -264,28 +302,66 @@ same records irrespective of block layout.
 | Item | Linux | macOS arm64 | Windows x86_64 |
 |---|---|---|---|
 | Compiler | LDC 1.42.0 (DMD v2.112.1, LLVM 21.1.8) | LDC 1.42.0 (DMD v2.112.1, LLVM 21.1.8) | LDC 1.40.0 (DMD v2.110.0, LLVM 19.1.3) |
-| Platform toolchain | GNU ld, glibc | Apple clang 21.0.0, macOS 26.2 | MSVC 19.50.35726 for x64 |
-| Build type | `release-znver4`, `release-znver2`, `release-broadwell` | `release-apple` | `release` |
-| GTK 3 | not linked, loaded at runtime | 3.24.52, loaded at runtime | mingw-w64-x86_64-gtk3 3.24.51-2, bundled |
+| Platform toolchain | GNU ld, glibc | Apple clang 21.0.0, macOS 26.2 | MSVC 19.50.35726 x64 |
+| Build type | `release-znver4`, `release-znver2`, `release-broadwell` | `release-apple` | `release` (dub built-in) |
+| LTO | none | none | none, and never was |
+| GTK 3 | not linked, loaded at runtime | 3.24.52, loaded at runtime | 3.24.51, bundled and loaded at runtime |
 
 Common to all three: dub 1.41.0, dependency versions pinned by
 `dub.selections.json` which travels inside the build kit, gtk-d 3.10.0 loaded
 at runtime, and a test gate of 66 modules passing unit tests.
 
-Windows used LDC 1.40.0 rather than the 1.42.0 used on the other two platforms.
-That is a real deviation from the build kit and is recorded rather than
-smoothed over. It has no observed effect on output: the Windows binary
-reproduces the reference record stream checksum exactly, which is the property
-the release is gated on.
+The `LTO` row is the point of this release. The Linux and macOS build types
+previously read `--flto=full`; they now do not. Windows uses none of those five
+build types — `release` is not defined in `dub.json`, so dub supplies its own
+`-release -O -inline` — which is why the Windows column reads "never was".
+
+The `Compiler` row is not uniform and should not be read as though it were. The
+Windows build is LDC 1.40.0 where Linux and macOS are 1.42.0, and it carries the
+older frontend and the older LLVM with it. This is the same divergence 1.19.0
+had, for the same reason: it is the toolchain installed on the machine that does
+the Windows builds. It is recorded rather than smoothed over because it is the
+one place the five archives do not share a compiler.
+
+Unlike 1.19.0, the Windows column here was read off the artifacts rather than
+supplied by the operator. `ldc2-1.40.0-windows-multilib` survives as a path
+string in both executables; the PE optional header gives linker 14.50, and the
+Rich header's linker record gives build 35726, which is `MSVC 19.50.35726`. The
+Rich header is identical tool-for-tool to 1.19.0's, so the build environment is
+demonstrably unchanged between the two releases.
+
+One consequence of that fallback is recorded as defect W2 and is unchanged
+here: dub's built-in `release` sets `-release` but not `-boundscheck=off`, so
+the Windows binary keeps bounds checking in `@safe` code that the Linux and
+macOS builds drop. It is a slightly different program under a memory-safety
+fault, and a confound in any cross-platform timing comparison. It is not
+something to change inside a release whose entire purpose is a single
+controlled build-flag change.
 
 The MSYS2 snapshot the 47 bundled DLLs came from is not recorded. It does not
 affect the artifact you download, which is verified by hash, by import table
 and by the record stream gate like every other build.
 
+It is worth being exact about one thing the wording above could otherwise
+obscure. The bundled runtime is **not** byte-identical to 1.19.0's. The 47
+top-level DLLs are the same count and GTK is the same 3.24.51, but `lib\` grew
+from 15 files to 17 and `share\` from 834 to 846, so the MSYS2 snapshot this
+build drew from is a later one. That is a change to what travels alongside the
+program, not to the program, and it is the one respect in which "the same tree,
+rebuilt without LTO" does not fully describe the Windows artifact. It has no
+bearing on the LTO comparison, since Windows was never LTO'd and the runtime is
+not compiled here at all.
+
 The binaries are not code-signed. On macOS, clear the quarantine attribute
 after unpacking with `xattr -dr com.apple.quarantine <folder>`. On Windows,
 SmartScreen will warn on first run; choose **More info** then **Run anyway**.
 Both are consequences of an unsigned download, not of anything the binary does.
+
+The Windows installer is unsigned for the same reason, and it will draw a
+louder SmartScreen warning than the zip does, because it asks for elevation and
+offers to edit `PATH`. That combination is exactly the shape SmartScreen is
+built to object to. If that is not a trade you want to make, use the zip: it
+contains the same files and needs no elevation at all.
 
 ## Known limitations
 
@@ -296,23 +372,31 @@ Both are consequences of an unsigned download, not of anything the binary does.
   were both run against the reference record stream and both matched. If you
   have an AVX-512 machine, run `t2gd checksum` against a broadwell result once
   before trusting znver4 on real work.
+* The 5.78 M-record internal corpus gate was not re-run for 1.19.1. The demo
+  gate was, on four build/binary combinations, and the 18-group digest
+  comparison behind the LTO decision covers far more ground than either. The
+  corpus gate is a belt-and-braces check on a release that changes no source,
+  and it is recorded as skipped rather than quietly dropped.
+* The *Installing T2GD* topic built into the executable still gives its example
+  filenames as `t2gd-1.19.0-...`. The instructions are correct; only the example
+  version string is stale. The manual is compiled into the binary, so correcting
+  it means rebuilding all five platforms, and the version number in an example
+  unpack command is not worth that. The download page and
+  [INSTALL.md](INSTALL.md) both carry the right names.
 * The manual built into the executable carries a screenshot of every tab, and
-  two of those pictures are stale in this build. The Help tab picture predates
-  the last five topics, so it shows a nine topic navigator where the manual
-  actually carries fourteen. The About tab picture still reads v1.18.0
-  "Fafnir". Both are pictures only: the manual text, the live navigator and the
-  real About tab are all correct, and the copies of both figures in this
-  repository under `figures/` were recaptured against 1.19.0. The manual is
-  compiled into the binary, so correcting the embedded copies means rebuilding
-  all five platforms.
+  two of those pictures are stale, unchanged from 1.19.0. The Help tab picture
+  shows a nine-topic navigator where the manual carries fourteen. The About tab
+  picture still reads v1.18.0 "Fafnir". Both are pictures only: the manual text,
+  the live navigator and the real About tab are all correct, and the copies of
+  both figures in this repository under `figures/` are current.
 * The 1.18.0 section of [CHANGELOG.md](CHANGELOG.md) opens "The first public
   release". That was written before the decision not to distribute Fafnir, and
-  it is wrong: 1.19.0 is the first release to leave the building. The changelog
-  ships inside all five archives, so correcting the line would mean repacking a
-  signed macOS bundle and a Windows payload for one sentence. It is corrected
-  here instead.
+  it is wrong: 1.19.0 was the first release to leave the building. The changelog
+  ships inside all five archives and is installed by the Windows installer; the
+  line is corrected here rather than by repacking a signed macOS bundle and a
+  Windows payload for one sentence.
 * There is no Intel Mac build and no universal binary.
-* Below roughly 4 GB of memory, a human sized annotation will not fit however
+* Below roughly 4 GB of memory, a human-sized annotation will not fit however
   the run is configured.
 
 ## Licence

@@ -4,6 +4,109 @@ Release notes for T2GD, the transcriptome-space to genome-space BAM
 conversion toolkit. This file records changes that affect the command line
 surface, the BAM output, or the install instructions.
 
+## 1.19.1 "Shenlong" (2026-08-09)
+
+Build recipe only. There is no source change, no change to the command line
+surface, and no change to any record T2GD writes. If you are running 1.19.0,
+nothing here requires you to change anything.
+
+Link time optimisation (`--flto=full`) is removed from the five shipping
+release recipes. The codename does not advance, because it is the same source
+tree and a new codename would imply new software.
+
+### Why
+
+LTO had been carried since 1.15.x on the assumption that it helps. It was
+measured instead, on a 96-CPU dual EPYC 9474F node under exclusive, quiescence
+gated allocation, and it does not help. It costs. Medians of the timed cells;
+negative means the binary without LTO is faster.
+
+| op | threads | with LTO | without LTO | change |
+|---|---|---|---|---|
+| `depth` | 1 | 162.78 s | 78.57 s | -51.73% |
+| `flagstat` | 8 | 14.75 s | 11.92 s | -19.19% |
+| `view_count` | 8 | 12.59 s | 10.89 s | -13.50% |
+| `flagstat` | 1 | 39.30 s | 35.18 s | -10.48% |
+| `convert` | 8 | 68.18 s | 61.76 s | -9.42% |
+| `view_count` | 1 | 36.20 s | 32.84 s | -9.26% |
+| `convert` | 1 | 169.88 s | 154.20 s | -9.23% |
+| `filter` | 8 | 51.42 s | 46.91 s | -8.77% |
+| `sort` | 8 | 101.43 s | 95.78 s | -5.57% |
+| `depth` | 8 | 29.85 s | 28.57 s | -4.29% |
+| `sort` | 1 | 445.26 s | 443.06 s | -0.49% |
+| `filter` | 1 | 231.61 s | 233.27 s | +0.72% |
+
+Not one cell is meaningfully faster with LTO. The single positive number is
+inside the run to run spread. Four further cells are excluded because the two
+builds did not run at comparable thread width, which makes a wall time
+comparison between them a comparison of something other than the code.
+
+### Correctness
+
+All 18 record stream digest groups agreed across every build tested, with zero
+mismatches, on both x86-64 and Apple Silicon. Removing LTO changes no output.
+
+### What you may notice
+
+* The `@PG` `VN:` field moves from `1.19.0-Shenlong` to `1.19.1-Shenlong`.
+  This is the only difference in a BAM header, and it does not affect records.
+* Binary size moves, and not in the same direction on both platforms. On
+  Linux both binaries shrink, the graphical one by about 20 % and the command
+  line one by about 31 %. On macOS both grow, by 82 % and 30 %. That
+  divergence is mostly the strip step rather than the code: Linux strips with
+  `--strip-all` and discards the symbol table outright, while macOS has to use
+  `strip -x` and keep the global symbols for the ad-hoc signature, and without
+  LTO far fewer symbols have been internalised, so far more of them survive.
+  Unstripped, the two platforms agree to within half a percent, at 13.64 MB on
+  Linux broadwell against 13.65 MB on macOS for the graphical build. Size is
+  not the objective here and no timing conclusion follows from it in either
+  direction.
+
+### Windows: an installer is offered for the first time
+
+Alongside the portable zip there is now
+`t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe`. It installs the same tree the
+zip carries, under `Program Files`, with Start-menu and optional desktop
+shortcuts and an option to put the install directory on `PATH`. The zip remains
+the primary Windows download and nothing is lost by preferring it; the installer
+exists so that Windows users who expect one are not asked to think about where
+to unpack a folder.
+
+The first build of it was rejected before release. A guard idiom in the Inno
+Setup script — `Check: DirExists(...)` on a preprocessor-expanded path — is
+evaluated on the *installing* machine rather than on the build host, so it was
+false everywhere and four of the nine file entries were skipped silently: the
+installer put 51 files on disk where the zip has 917, omitting the whole of the
+GTK runtime's loaders, icons and GSettings schemas. That build was never
+published. The shipping installer was rebuilt against a corrected script and
+verified by installing it and comparing all 916 installed files against the zip;
+none differ. The only file the installer does not carry is `SHA256SUMS`, which
+certifies the zip and means nothing once a tree is installed.
+
+### Known limitations
+
+* The **Installing T2GD** topic in the built-in manual gives its example
+  filenames as `t2gd-1.19.0-...`. The instructions are right; only the example
+  version string is stale. The manual is compiled into the executable, so
+  correcting it would mean rebuilding all five platforms and re-establishing
+  every checksum in this release, which is not worth a version number in a
+  sample unpack command. `INSTALL.md` in the repository carries the correct
+  names, as does the release download page.
+* The screenshot of the Help tab in the built-in manual still predates the last
+  five topics, so it shows a nine-topic navigator where the manual carries
+  fourteen, and the About tab picture still reads v1.18.0 "Fafnir". Both are
+  pictures only. The manual text, the live navigator and the real About tab are
+  all correct.
+* The znver4 build was not executed before release. The packaging host has no
+  AVX-512, so that binary exits 132 there, which is SIGILL. That is positive
+  evidence it really targeted znver4 and it is not evidence that it converts
+  correctly. The znver2 and broadwell builds were both run against the
+  reference record stream and both matched.
+* The 5.78 M-record internal corpus gate was not re-run for 1.19.1. The demo
+  gate was, and the 18-group digest comparison behind the LTO decision covers
+  more ground than either. It is recorded as skipped rather than quietly
+  dropped.
+
 ## 1.19.0 "Shenlong" (2026-07-31)
 
 Packaging and performance. There is no change to the command line surface and

@@ -2,7 +2,7 @@
 
 **Transcriptome-space to genome-space BAM conversion.**
 
-Version 1.19.0 "Shenlong" | Linux, macOS, Windows | no dependencies | CC BY-NC-ND 4.0
+Version 1.19.1 "Shenlong" | Linux, macOS, Windows | no dependencies | CC BY-NC-ND 4.0
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21744718.svg)](https://doi.org/10.5281/zenodo.21744718)
 
@@ -58,10 +58,14 @@ T2GD replaces; it is published here under [python/](python/), so the comparison
 can be repeated. Full tables, including the read-for-read accuracy audit, are in
 the built-in **Performance and resources** topic.
 
-Two things about this table are worth knowing before you quote it. The binary
-measured was v1.17.52 against Python 5.6, one release before the versions
+Three things about this table are worth knowing before you quote it. The binary
+measured was v1.17.52 against Python 5.6, several releases before the versions
 published here; the conversion path did not change between them, but the
-numbers were not re-run on 1.19.0. And T2GD's GTF cache was pre-warmed, as the
+numbers were not re-run on 1.19.1. Nor is the measured binary built the way the
+shipped one now is: 1.19.1 removes link-time optimisation from every published
+build type, which moves timings on its own and by more than a little in places,
+so treat these figures as the order of magnitude rather than as this release's
+numbers. And T2GD's GTF cache was pre-warmed, as the
 shipped default leaves it on, while the Python reference parses the annotation
 from scratch on every run. Annotation parsing is a fixed cost that falls
 entirely on the Python side of every row, and it is a large fraction of the
@@ -114,26 +118,33 @@ AVX-512; [RELEASE_NOTES.md](RELEASE_NOTES.md) says so under Known limitations.
 ## Install
 
 Download an archive from the
-[latest release](https://github.com/Arnaroo/T2GD/releases/tag/v1.19.0), unpack
+[latest release](https://github.com/Arnaroo/T2GD/releases/tag/v1.19.1), unpack
 it, and run the binary. Nothing is installed, no runtime is required, and no
 data directory is created.
 
 | Platform | Archive |
 |---|---|
-| Linux x86_64, AMD Zen 4 or newer | `t2gd-1.19.0-Shenlong-linux-x86_64-znver4.tar.gz` |
-| Linux x86_64, AMD Zen 2 or newer | `t2gd-1.19.0-Shenlong-linux-x86_64-znver2.tar.gz` |
-| Linux x86_64, widest reach | `t2gd-1.19.0-Shenlong-linux-x86_64-broadwell.tar.gz` |
-| macOS, Apple Silicon, 14 or newer | `t2gd-1.19.0-Shenlong-macos-arm64.tar.gz` |
-| Windows x86_64, 10 or newer | `t2gd-1.19.0-Shenlong-windows-x86_64.zip` |
+| Linux x86_64, AMD Zen 4 or newer | `t2gd-1.19.1-Shenlong-linux-x86_64-znver4.tar.gz` |
+| Linux x86_64, AMD Zen 2 or newer | `t2gd-1.19.1-Shenlong-linux-x86_64-znver2.tar.gz` |
+| Linux x86_64, widest reach | `t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz` |
+| macOS, Apple Silicon, 14 or newer | `t2gd-1.19.1-Shenlong-macos-arm64.tar.gz` |
+| Windows x86_64, 10 or newer | `t2gd-1.19.1-Shenlong-windows-x86_64.zip` |
 
 ```sh
-tar xzf t2gd-1.19.0-Shenlong-linux-x86_64-broadwell.tar.gz
+tar xzf t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz
 cd linux-broadwell
 ./t2gd-cli --version
 ```
 
 If you are unsure which Linux build to take, take `broadwell`. It runs
 everywhere the others do.
+
+Windows users who would rather not unpack a folder can take
+`t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe` instead. It installs the same
+files, adds shortcuts and an optional `PATH` entry, and registers an
+uninstaller. It needs administrator rights and it is unsigned, so SmartScreen
+will object more loudly than it does to the ZIP; the ZIP remains the
+recommended download. See [INSTALL.md](INSTALL.md#windows).
 
 Every archive contains two binaries. `t2gd` is the full build and runs headless
 as `t2gd --cli <subcommand>`. `t2gd-cli` contains no graphical code at all and
@@ -294,7 +305,7 @@ and merges at the end, so peak memory stays flat as the input grows.
 | [INSTALL.md](INSTALL.md) | Download, unpack, verify, per-platform notes, containers and HPC |
 | [USAGE.md](USAGE.md) | The one command, workflows, tuning, tags, troubleshooting, the full flag reference, and a tour of the interface |
 | [CHANGELOG.md](CHANGELOG.md) | What is in this release, and the known limitations |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | Artifact table and checksums for v1.19.0 |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | Artifact table and checksums for v1.19.1 |
 | [python/README.md](python/README.md) | The Python reference implementation of the conversion method |
 
 The complete manual is inside the binary. Read it with `t2gd-cli help`, or
@@ -313,7 +324,7 @@ If you use T2GD in work you publish, please cite it. GitHub reads
 "Cite this repository" link.
 
 > T2GD: transcriptome-space to genome-space BAM conversion toolkit,
-> version 1.19.0. Biocodecs, Arnaroo Ribologicals, COMPASS, 2026.
+> version 1.19.1. Biocodecs, Arnaroo Ribologicals, COMPASS, 2026.
 > https://github.com/Arnaroo/T2GD
 
 ## Licence
