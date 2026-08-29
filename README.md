@@ -307,6 +307,7 @@ and merges at the end, so peak memory stays flat as the input grows.
 | [CHANGELOG.md](CHANGELOG.md) | What is in this release, and the known limitations |
 | [RELEASE_NOTES.md](RELEASE_NOTES.md) | Artifact table and checksums for v1.19.1 |
 | [python/README.md](python/README.md) | The Python reference implementation of the conversion method |
+| [reproducibility/README.md](reproducibility/README.md) | The supplementary code and data package behind the published benchmarks: what it holds, where to download it, how to verify it |
 
 The complete manual is inside the binary. Read it with `t2gd-cli help`, or
 `t2gd-cli help <topic>` for one topic, or open the Help tab in the interface.
