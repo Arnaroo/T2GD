@@ -2,7 +2,7 @@
 
 **Transcriptome-space to genome-space BAM conversion.**
 
-Version 1.19.1 "Shenlong" | Linux, macOS, Windows | no dependencies | CC BY-NC-ND 4.0
+Version 1.22.0 "Vritra" | Linux, macOS, Windows | no dependencies | CC BY-NC-ND 4.0
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21744718.svg)](https://doi.org/10.5281/zenodo.21744718)
 
@@ -12,8 +12,9 @@ alignment is lifted onto the genome, its CIGAR split at every exon boundary it
 crosses, and an `N` operation inserted for each intron, so the converted record
 is a spliced genomic alignment that genome browsers, variant callers and
 coverage tools read correctly. Around that sits a self-contained BAM toolkit of
-36 subcommands, and the whole thing ships as one static executable that is both
-a command line tool and a desktop application.
+36 subcommands. It ships as two executables with no runtime dependencies, a
+desktop application and a command line tool, and on Linux the command line tool
+also comes fully static.
 
 ![Transcript space to genome space](figures/tx-to-genome.png)
 
@@ -60,12 +61,11 @@ the built-in **Performance and resources** topic.
 
 Three things about this table are worth knowing before you quote it. The binary
 measured was v1.17.52 against Python 5.6, several releases before the versions
-published here; the conversion path did not change between them, but the
-numbers were not re-run on 1.19.1. Nor is the measured binary built the way the
-shipped one now is: 1.19.1 removes link-time optimisation from every published
-build type, which moves timings on its own and by more than a little in places,
-so treat these figures as the order of magnitude rather than as this release's
-numbers. And T2GD's GTF cache was pre-warmed, as the
+published here, and the numbers were not re-run on 1.22.0. Since then 1.19.1
+removed link-time optimisation from every published build type, and 1.22.0's
+`convert` adds by default a pass that collapses isoform duplicates; both move
+timings, so treat these figures as the order of magnitude rather than as this
+release's numbers. And T2GD's GTF cache was pre-warmed, as the
 shipped default leaves it on, while the Python reference parses the annotation
 from scratch on every run. Annotation parsing is a fixed cost that falls
 entirely on the Python side of every row, and it is a large fraction of the
@@ -96,8 +96,12 @@ when given 400 GB, where it needs 178 GB and just under two hours.
 
 ![Memory under a cap](figures/memory-comparison.png)
 
-Threads are useful from 4 to 16. Beyond that, coordination costs exceed the
-gain.
+Threads help up to eight and no further. The figure, from the same v1.17.52
+measurement on a whole node, is flat from four threads to eight and rises after.
+1.22.0 was measured restricted to as many cores as threads: every input ran
+fastest on eight, 2.7 to 3.0 times faster than on one, and no sixteen-thread run
+beat eight threads on one die. So give `-t 8 --threads-bgzf 8` on eight cores
+reserved for the job; [USAGE.md](USAGE.md) has the details.
 
 ![Thread scaling](figures/thread-scaling.png)
 
@@ -105,33 +109,34 @@ gain.
 reference exactly. The exceptions are documented rather than hidden: two `sort`
 runs differ in BGZF block boundaries while the record stream is identical, one
 `convert` run drops 368 reads of 10.4 million (0.0035 percent) as
-`intron_too_large`, and `count` agrees with featureCounts on 80.5 and 83.4
+`intron_too_large`, under an intron limit that 1.22.0 no longer applies by
+default, and `count` agrees with featureCounts on 80.5 and 83.4
 percent of genes on two real datasets while matching exactly on synthetic data.
 
 Platforms produce the same records from the same input, byte for byte, so a
 result does not change when you move machines. That was checked for this
-release on the two Linux builds that would run on the packaging host, on
-Windows under wine, and on macOS from its own build host. The znver4 build
-could not be executed for the check, because the packaging host has no
-AVX-512; [RELEASE_NOTES.md](RELEASE_NOTES.md) says so under Known limitations.
+release on all ten Linux binaries (seven on the packaging host, and the three
+znver4 ones, which need AVX-512, on an AMD EPYC 9474F machine), on Windows
+under wine, and on macOS on its own build host.
 
 ## Install
 
 Download an archive from the
-[latest release](https://github.com/Arnaroo/T2GD/releases/tag/v1.19.1), unpack
+[latest release](https://github.com/Arnaroo/T2GD/releases/tag/v1.22.0), unpack
 it, and run the binary. Nothing is installed, no runtime is required, and no
 data directory is created.
 
 | Platform | Archive |
 |---|---|
-| Linux x86_64, AMD Zen 4 or newer | `t2gd-1.19.1-Shenlong-linux-x86_64-znver4.tar.gz` |
-| Linux x86_64, AMD Zen 2 or newer | `t2gd-1.19.1-Shenlong-linux-x86_64-znver2.tar.gz` |
-| Linux x86_64, widest reach | `t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz` |
-| macOS, Apple Silicon, 14 or newer | `t2gd-1.19.1-Shenlong-macos-arm64.tar.gz` |
-| Windows x86_64, 10 or newer | `t2gd-1.19.1-Shenlong-windows-x86_64.zip` |
+| Linux x86_64, AMD Zen 4 or newer | `t2gd-1.22.0-Vritra-linux-x86_64-znver4.tar.gz` |
+| Linux x86_64, AMD Zen 2 or newer | `t2gd-1.22.0-Vritra-linux-x86_64-znver2.tar.gz` |
+| Linux x86_64, widest reach | `t2gd-1.22.0-Vritra-linux-x86_64-broadwell.tar.gz` |
+| Linux x86_64, AVX2, static command line only | `t2gd-1.22.0-Vritra-linux-x86_64-generic.tar.gz` |
+| macOS, Apple Silicon, 14 or newer | `t2gd-1.22.0-Vritra-macos-arm64.tar.gz` |
+| Windows x86_64, 10 or newer | `t2gd-1.22.0-Vritra-windows-x86_64.zip` |
 
 ```sh
-tar xzf t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz
+tar xzf t2gd-1.22.0-Vritra-linux-x86_64-broadwell.tar.gz
 cd linux-broadwell
 ./t2gd-cli --version
 ```
@@ -140,7 +145,7 @@ If you are unsure which Linux build to take, take `broadwell`. It runs
 everywhere the others do.
 
 Windows users who would rather not unpack a folder can take
-`t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe` instead. It installs the same
+`t2gd-1.22.0-Vritra-windows-x86_64-setup.exe` instead. It installs the same
 files, adds shortcuts and an optional `PATH` entry, and registers an
 uninstaller. It needs administrator rights and it is unsigned, so SmartScreen
 will object more loudly than it does to the ZIP; the ZIP remains the
@@ -148,7 +153,10 @@ recommended download. See [INSTALL.md](INSTALL.md#windows).
 
 Every archive contains two binaries. `t2gd` is the full build and runs headless
 as `t2gd --cli <subcommand>`. `t2gd-cli` contains no graphical code at all and
-is the one to use on HPC nodes and in containers. On Windows the pair is
+is the one to use on HPC nodes and in containers. The Linux archives add a
+third, `t2gd-cli-static`, the same command line program with no dynamic section,
+for minimal containers and hosts whose C library is older or different; the
+`generic` archive carries it alone. On Windows the pair is
 `t2gd.exe` and `t2gd-cli.exe`: double-click the first for the interface, which
 opens with no console window beside it, and use the second for the command
 line. The Windows archive also carries the GTK runtime, so keep the folder
@@ -305,7 +313,7 @@ and merges at the end, so peak memory stays flat as the input grows.
 | [INSTALL.md](INSTALL.md) | Download, unpack, verify, per-platform notes, containers and HPC |
 | [USAGE.md](USAGE.md) | The one command, workflows, tuning, tags, troubleshooting, the full flag reference, and a tour of the interface |
 | [CHANGELOG.md](CHANGELOG.md) | What is in this release, and the known limitations |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | Artifact table and checksums for v1.19.1 |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | Artifact table and checksums for v1.22.0 |
 | [python/README.md](python/README.md) | The Python reference implementation of the conversion method |
 | [reproducibility/README.md](reproducibility/README.md) | The supplementary code and data package behind the published benchmarks: what it holds, where to download it, how to verify it |
 
@@ -325,7 +333,7 @@ If you use T2GD in work you publish, please cite it. GitHub reads
 "Cite this repository" link.
 
 > T2GD: transcriptome-space to genome-space BAM conversion toolkit,
-> version 1.19.1. Biocodecs, Arnaroo Ribologicals, COMPASS, 2026.
+> version 1.22.0. Biocodecs, Arnaroo Ribologicals, COMPASS, 2026.
 > https://github.com/Arnaroo/T2GD
 
 ## Licence

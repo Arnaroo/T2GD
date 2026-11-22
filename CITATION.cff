@@ -12,30 +12,35 @@ abstract: >-
   filtering, sorting, indexing, counting, splice-junction cataloguing,
   plotting and validation. It ships as two dependency-free executables, a
   desktop application and a command line tool, the latter carrying no
-  graphical code at all so that it runs on cluster nodes and in containers.
+  graphical code at all so that it runs on cluster nodes and in containers;
+  on Linux the command line tool also comes fully static.
 type: software
-version: 1.19.1
-date-released: "2026-08-09"
+version: 1.22.0
+date-released: "2026-11-01"
 license: CC-BY-NC-ND-4.0
-# Concept DOI, not the version DOI.  Zenodo mints the version DOI when the
-# release is published, so it cannot be written here beforehand; carrying
-# 1.19.0's would point every citation of 1.19.1 at the wrong snapshot.  The
-# concept DOI always resolves to the latest version and is correct at all
-# times, so this line does not change from release to release.  The snapshot
-# DOIs accumulate under `identifiers` below, newest first, and are added after
-# the fact once Zenodo has issued them.
+# Concept DOI, not the version DOI.  The concept DOI always resolves to the
+# latest version and is correct at all times, so this line does not change
+# from release to release.  The snapshot DOIs accumulate under `identifiers`
+# below, newest first.  Up to 1.19.1 the GitHub hook minted them when the
+# release was published, so each was added after the fact; 1.22.0's version
+# is deposited by hand, with the release binaries, and its DOI is reserved in
+# the Zenodo draft before the release, so it goes in with the release commit
+# (scripts/fill_version_doi.py).
 doi: 10.5281/zenodo.21744718
 identifiers:
   - type: doi
     value: 10.5281/zenodo.21744718
     description: "Concept DOI, always resolves to the latest version"
   - type: doi
+    value: 10.5281/zenodo.24433505
+    description: "Archived snapshot of version 1.22.0, with the release binaries"
+  - type: doi
     value: 10.5281/zenodo.22016829
     description: "Archived snapshot of version 1.19.1"
   - type: doi
     value: 10.5281/zenodo.21744719
     description: "Archived snapshot of version 1.19.0"
-repository-artifact: "https://github.com/Arnaroo/T2GD/releases/tag/v1.19.1"
+repository-artifact: "https://github.com/Arnaroo/T2GD/releases/tag/v1.22.0"
 url: "https://biocodecs.org"
 authors:
   - name: "Biocodecs"

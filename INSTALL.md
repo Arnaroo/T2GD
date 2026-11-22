@@ -9,22 +9,24 @@ immediately on a machine with no network and nothing on the path.
 
 ## Choose an archive
 
-All five archives are attached to the
-[v1.19.1 release](https://github.com/Arnaroo/T2GD/releases/tag/v1.19.1), plus a
+All six archives are attached to the
+[v1.22.0 release](https://github.com/Arnaroo/T2GD/releases/tag/v1.22.0), plus a
 Windows installer described under [Windows](#windows) below.
 
 | Archive | Platform | Requirement |
 |---|---|---|
-| `t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz` | Linux x86_64 | any reasonably modern x86_64, the safe default |
-| `t2gd-1.19.1-Shenlong-linux-x86_64-znver2.tar.gz` | Linux x86_64 | AMD Zen 2 or newer |
-| `t2gd-1.19.1-Shenlong-linux-x86_64-znver4.tar.gz` | Linux x86_64 | AVX-512, so AMD Zen 4 or newer |
-| `t2gd-1.19.1-Shenlong-macos-arm64.tar.gz` | macOS | Apple Silicon M1 or newer, macOS 14 or newer |
-| `t2gd-1.19.1-Shenlong-windows-x86_64.zip` | Windows | any x86-64, Windows 10 or newer |
+| `t2gd-1.22.0-Vritra-linux-x86_64-broadwell.tar.gz` | Linux x86_64 | any reasonably modern x86_64, the safe default |
+| `t2gd-1.22.0-Vritra-linux-x86_64-znver2.tar.gz` | Linux x86_64 | AMD Zen 2 or newer |
+| `t2gd-1.22.0-Vritra-linux-x86_64-znver4.tar.gz` | Linux x86_64 | AVX-512, so AMD Zen 4 or newer |
+| `t2gd-1.22.0-Vritra-linux-x86_64-generic.tar.gz` | Linux x86_64 | AVX2 (x86-64-v3: Intel Haswell, AMD Zen and newer); the static command line binary only |
+| `t2gd-1.22.0-Vritra-macos-arm64.tar.gz` | macOS | Apple Silicon M1 or newer, macOS 14 or newer |
+| `t2gd-1.22.0-Vritra-windows-x86_64.zip` | Windows | any x86-64, Windows 10 or newer |
 
 **Which Linux build?** If you are not sure, take **broadwell**. It runs
-everywhere the other two do. The znver2 and znver4 builds are tuned for
-those microarchitectures; znver4 contains AVX-512 instructions and will
-fault with an illegal instruction on a CPU without them. To check:
+everywhere the znver2 and znver4 builds do. Those two are tuned for their
+microarchitectures; znver4 contains AVX-512 instructions and will fault
+with an illegal instruction on a CPU without them. The **generic** archive
+holds only `t2gd-cli-static`, built for any CPU with AVX2. To check:
 
 ```sh
 grep -o 'avx512[a-z]*' /proc/cpuinfo | sort -u | head
@@ -37,7 +39,8 @@ Linux arm64 build.
 
 ## Which binary is in the archive
 
-The Linux and macOS archives contain two executables:
+The Linux and macOS archives contain two executables, and the Linux ones a
+third:
 
 * **`t2gd`** is the full build. Run it with no arguments and the graphical
   interface opens; put `--cli` in front of a subcommand and it runs
@@ -47,6 +50,11 @@ The Linux and macOS archives contain two executables:
 * **`t2gd-cli`** contains no graphical code at all and needs nothing beyond
   the platform system libraries. This is the binary for HPC nodes,
   containers, and any command line work.
+* **`t2gd-cli-static`**, on Linux only, is the same command line program
+  with no dynamic section at all, so it needs no C library on the host:
+  for a minimal container image, or a system whose C library is older or
+  different from the one `t2gd-cli` was linked on. The `generic` archive
+  carries it alone.
 
 The Windows archive contains **two** executables as well, for a different
 reason. `t2gd.exe` is the graphical interface and `t2gd-cli.exe` is the
@@ -60,10 +68,10 @@ so that command line work has somewhere to print.
 ## Linux
 
 ```sh
-tar xzf t2gd-1.19.1-Shenlong-linux-x86_64-broadwell.tar.gz
+tar xzf t2gd-1.22.0-Vritra-linux-x86_64-broadwell.tar.gz
 cd linux-broadwell
 sha256sum -c SHA256SUMS
-chmod +x t2gd t2gd-cli
+chmod +x t2gd t2gd-cli t2gd-cli-static
 ./t2gd-cli --version
 ```
 
@@ -80,10 +88,10 @@ Or, without root:
 mkdir -p ~/.local/bin && install -m 755 t2gd-cli ~/.local/bin/
 ```
 
-Both binaries are static beyond the platform C libraries. `readelf -d`
-NEEDED lists only `libz.so.1`, `libm.so.6`, `libgcc_s.so.1`, `libc.so.6`
-and `ld-linux-x86-64.so.2`. GTK 3 is absent from that list even in the
-full build.
+`t2gd` and `t2gd-cli` are static beyond the platform C libraries.
+`readelf -d` NEEDED lists only `libz.so.1`, `libm.so.6`, `libgcc_s.so.1`,
+`libc.so.6` and `ld-linux-x86-64.so.2`. GTK 3 is absent from that list even
+in the full build. `t2gd-cli-static` has no dynamic section at all.
 
 **For the graphical interface**, install GTK 3 from your distribution:
 
@@ -100,7 +108,7 @@ fault in the binary; use `t2gd-cli` for command line work.
 ## macOS
 
 ```sh
-tar xzf t2gd-1.19.1-Shenlong-macos-arm64.tar.gz
+tar xzf t2gd-1.22.0-Vritra-macos-arm64.tar.gz
 cd macos-arm64
 shasum -a 256 -c SHA256SUMS
 xattr -dr com.apple.quarantine T2GD.app t2gd t2gd-cli
@@ -160,12 +168,12 @@ needs none of this.
 There are two ways in. **The ZIP is the primary one** and the rest of this
 section assumes it.
 
-`t2gd-1.19.1-Shenlong-windows-x86_64-setup.exe` is an installer carrying the
+`t2gd-1.22.0-Vritra-windows-x86_64-setup.exe` is an installer carrying the
 same files. It puts them under `Program Files`, adds Start-menu and optional
 desktop shortcuts, can add the install directory to your `PATH`, and registers
 an uninstaller. Use it if you would rather not decide where to put a folder.
 Two things to know before you do: it asks for administrator rights, and it is
-unsigned, so SmartScreen objects more loudly to it than to the ZIP — a program
+unsigned, so SmartScreen objects more loudly to it than to the ZIP: a program
 that wants elevation *and* wants to edit `PATH` is exactly the shape SmartScreen
 is built to warn about. Choose **More info**, then **Run anyway**. The ZIP needs
 no elevation at all and contains the same 916 files, so nothing is lost by
@@ -230,6 +238,23 @@ FROM debian:bookworm-slim
 COPY t2gd-cli /usr/local/bin/t2gd-cli
 ```
 
+For an image with no C library at all, or a cluster whose C library is older
+than the one `t2gd-cli` was linked on, take `t2gd-cli-static`:
+
+```dockerfile
+FROM scratch
+COPY t2gd-cli-static /t2gd-cli
+ENTRYPOINT ["/t2gd-cli"]
+```
+
+**Threads.** For one conversion at a time, give `-t 8 --threads-bgzf 8` on
+eight cores reserved for the job, of one socket where possible: a job
+allocation of eight cores enforces this, and on a whole node `taskset -c 0-7`
+does.
+The default worker count is the number of processors the process may use,
+less two, which on a large node is well past the fastest setting.
+[USAGE.md](USAGE.md) gives the measurements.
+
 The manual, all fourteen topics and all twenty figures, is compiled into
 the executable, so `t2gd-cli help` works inside a scratch-adjacent image
 with no data directory and no network.
@@ -248,7 +273,7 @@ shasum -a 256 -c SHA256SUMS     # macOS
 ## Confirming the install
 
 ```sh
-t2gd-cli --version    # banner reads 1.19.1 / Shenlong
+t2gd-cli --version    # banner reads 1.22.0 / Vritra / 2026-11-01
 t2gd-cli help         # the topic index
 ```
 
@@ -256,7 +281,9 @@ For a first end to end run, see [USAGE.md](USAGE.md).
 
 ## A note on the built-in manual
 
-`t2gd-cli help install` covers the same ground from inside the binary: the
-same three Linux variants, the same two binaries per platform, the same
-`T2GD.app`. Where the two differ in emphasis, this file is written from the
+`t2gd-cli help install` covers the same ground from inside the binary, but
+it predates 1.22.0: it names the three microarchitecture builds and not the
+`generic` archive or `t2gd-cli-static`, and its examples use 1.19.0 file
+names. The manual is compiled in, and this release keeps the binary the
+revised paper was measured with byte for byte. This file is written from the
 artifacts and is the one to trust.

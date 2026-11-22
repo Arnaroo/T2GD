@@ -4,6 +4,166 @@ Release notes for T2GD, the transcriptome-space to genome-space BAM
 conversion toolkit. This file records changes that affect the command line
 surface, the BAM output, or the install instructions.
 
+## 1.22.0 "Vritra" (2026-11-01)
+
+The release that goes with the revised T2G paper. `convert` changes three
+defaults, and its paired output is now sorted as its header has always said.
+It also carries 1.20.0 to 1.21.3, five versions made while the paper was under
+review and never published; they are summarised at the end of this section.
+
+**If you script against 1.19.1, read "Getting 1.19.1's records back" first.**
+A default `convert` run now writes fewer records for reads that match several
+isoforms, and adds two tags to every spliced record.
+
+### Isoform duplicates are written once
+
+An aligner working in transcript space reports a read once for every isoform
+it matches. After the lift, many of those records are the same genomic
+alignment: the same chromosome, position, strand and CIGAR, written several
+times. `convert` now keeps one record for each, the primary when one of them is
+primary. The record that stays carries `ta:Z`, the isoforms it stands for (its
+own first), and `tn:i`, their number.
+
+For every read that lost a record, `NH` is recomputed as the number of
+non-supplementary records left in genome space, and when no primary survived (the aligner's primary was on
+a transcript the annotation lacks) the first record left is promoted to primary.
+`HI` is left as the aligner wrote it. MAPQ keeps the aligner's value, because
+aligners use different scales (bowtie2 tops at 42, minimap2 at 60, STAR at
+255); `--unique-mapq N` sets MAPQ N on a read whose placements collapsed to one.
+
+The pass needs the sorted output, so `--no-sort` turns it off, with a warning.
+`--keep-isoform-duplicates` keeps every record the aligner wrote. The run
+summary gains rows counting what the pass did.
+
+### Strand tags on spliced records
+
+Every lifted record whose genome CIGAR has an `N` now carries `XS:A`, the
+transcript's strand on the genome (the convention of HISAT2, STAR and TopHat),
+and `ts:A`, the same strand relative to the record's own orientation
+(minimap2's convention). StringTie reads both. Neither is written over a tag of
+the same name that the aligner already wrote, such as bowtie2's `XS:i` (a
+score) or Dorado's `ts:i` (trimmed samples). `--strand-tag all` extends them to
+unspliced records; `--strand-tag none` turns them off.
+
+### No intron limit by default
+
+A read is no longer skipped because its alignment crosses a long annotated
+intron. The intron comes from the annotation, so its size is not evidence
+against the read. `--max-intron` now defaults to 0, no limit, and `--warn-intron`
+still warns at 100,000. The `--species` presets are one table, shared with the
+Python reference: human, mouse and zebrafish 500,000; plant 750,000; fly or
+drosophila 100,000; worm 50,000; yeast 5,000. 1.19.1 had human 500,000, mouse
+240,000, yeast 2,000 and drosophila 100,000. An explicit `--max-intron` wins
+over a preset.
+
+### The paired output is coordinate-sorted
+
+Pair restoration wrote each pair when its second mate arrived, so every earlier
+version wrote its paired output out of order under an `@HD SO:coordinate`
+line, and `samtools index` refused it. The paired output is now sorted before
+it is written, with the run's own thread and memory settings. `--no-sort` leaves
+it unsorted, as before. Single-end output is unaffected.
+
+### Getting 1.19.1's records back
+
+```
+t2gd-cli convert ... --keep-isoform-duplicates --strand-tag none --max-intron 500000
+```
+
+restores the earlier record set. On the demo input the record stream is then
+byte-identical to 1.19.1's, and on a single-end corpus of 5.8 million records to
+1.19.0's. Paired output holds the same records in a different order, because it
+is now sorted; `t2gd checksum`, which ignores order, compares the records alone.
+
+### Python reference 5.8
+
+The reference implementation under `python/` makes the same three changes and
+takes the same flags. On matched settings the two implementations agree record
+for record: on all 59,886 records of the demo input, tags included, and on all
+four records of a fixture built to exercise the collapse.
+
+### Choosing a thread count
+
+For one conversion at a time, give `-t 8 --threads-bgzf 8` on eight cores
+reserved for the job, of one socket where possible: a cluster allocation of
+that size enforces this, and on a whole node `taskset` does. Measured for the
+paper on nodes of two 48-core AMD EPYC 9474F, restricted to as many cores as
+threads, every input ran fastest on eight threads, 2.7 to 3.0 times faster
+than on one, and no sixteen-thread run beat eight threads on one die. With
+`-t` alone on a whole 96-core node the same lifts took up to 2.2 times as
+long. The default worker count is the number of logical processors the
+process may use, less two, which on a large node is far past that point, so
+`-t` is worth giving explicitly.
+This advice is in `USAGE.md`, not in the built-in help. The source of this
+release is exactly the source the paper was measured with, and its generic
+build is the measured binary byte for byte; changing the help text would have
+changed it.
+
+### A fully static Linux build
+
+Each Linux archive now carries `t2gd-cli-static` beside `t2gd` and `t2gd-cli`:
+the same command line program, linked with no dynamic section at all, so it
+needs no C library on the host and runs in minimal containers and on systems
+with an older or different C library. A fourth Linux archive, `generic`, holds
+only `t2gd-cli-static`, built for x86-64-v3, which needs AVX2 (Intel Haswell,
+AMD Zen and newer). It is byte for byte the build that made the revised
+paper's timings; the paper's lifts were made with it, or with a build that
+differs from it only in the order of paired output.
+
+### Also in this release, from the unpublished 1.20.0 to 1.21.3
+
+* **`sort` accepts SAM on `-i`**, encoding on the way in as `samtools sort`
+  does. The product is byte-identical to encoding first and sorting second.
+* **`fastq` and `fasta` copy aux tags with `-T TAG[,TAG...]`** (`'*'` for every
+  tag) onto the read-name line, in the form `minimap2 -y` reads, byte-identical
+  to `samtools fastq -T` on the probes tried. This is how base modification tags
+  (`MM`, `ML`) survive a trip back through FASTQ.
+* **`--no-pg` and `--pg-id ID`**, two global options: write no `@PG` line, or
+  stamp one under a name of your choosing, so that two runs differing only in
+  where their output went can produce identical bytes. `convert` and
+  `inject-summary` no longer put the path of the t2gd binary into the `@PG`
+  line.
+* **`@HD SO:` tells the truth under `--no-sort`**: `convert --no-sort` now writes
+  `SO:unsorted`. A length in `@SQ LN:` that was estimated because no
+  `--chrom-sizes` was given is now reported in a warning.
+* **The graphical binary hands every subcommand to the command line.** Before,
+  `t2gd count`, `t2gd flagstat` and twenty-odd others opened a window instead
+  of running, which to a script looks like a hang. `--list-commands` prints
+  every subcommand, one per line.
+* **A BAM that does not end with its 28-byte end-of-file block is refused when
+  it is opened**, before any record is written anywhere. That includes a file
+  MinKNOW or Dorado is still writing. An end-of-file block in the middle of a
+  file is skipped, a block whose stated size disagrees with what it inflates to
+  is refused, and a failed open no longer leaves threads running or hangs.
+  Before, a cut BAM drew a warning and was read as though it were complete.
+* **A BGZF block filled to the maximum the format allows now reads on one
+  thread.** Such files (INDEGRA writes them) failed at `-t 1` and read at
+  `-t 2`.
+* **The tag table in the manual was corrected**: `gn` is the GTF `gene_id`, not
+  `gene_name`; `xi` is a 0 or 1 flag; `im` is the largest intron in bp; `ro` is
+  1 or -1; `es` and `ee` are 3' end distances; `gs` and `ge` are this
+  alignment's own lifted start and end. The tags themselves are unchanged.
+
+### Correctness
+
+On the demo input all ten Linux binaries write the same 59,886 records under the
+defaults, and, with duplicates kept and strand tags off, 1.19.1's record stream:
+seven on the packaging host, and the three znver4 binaries, which need AVX-512,
+on an AMD EPYC 9474F (Zen 4) machine, unpacked from their archive. The checks
+are listed in `RELEASE_NOTES.md`.
+
+### Known limitations
+
+* The **Installing T2GD** topic in the built-in manual predates this release:
+  it names three Linux builds where there are now four archives and a static
+  binary, and gives its example filenames as `t2gd-1.19.0-...`. `INSTALL.md`
+  and the `RUN_LINUX.txt` page in each archive are current. The manual is
+  compiled into the executable, and this release keeps the measured binaries
+  byte for byte.
+* The screenshot of the Help tab in the built-in manual still shows nine topics
+  where the manual carries fourteen, and the About tab picture still reads
+  v1.18.0. Both are pictures only.
+
 ## 1.19.1 "Shenlong" (2026-08-09)
 
 Build recipe only. There is no source change, no change to the command line

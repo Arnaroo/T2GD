@@ -1,7 +1,7 @@
 # T2G reference implementation (Python)
 
 `t2g_bam_converter.py` is the reference implementation of the transcriptome-to-genome
-conversion method. Version 5.7.
+conversion method. Version 5.8.
 
 This is the same method the compiled `t2gd` binary implements. It is published
 so that the method is auditable and the results in the accompanying paper are
@@ -56,7 +56,10 @@ python3 t2g_bam_converter.py \
 |---|---|
 | `--strip-version` | your BAM `@SQ` names are versioned (`ENST00000456328.2`) but the GTF IDs are bare, or vice versa |
 | `-t N` | worker processes |
-| `--species human` | sets a sane maximum intron size; see `--max-intron` for the manual version |
+| `--species human` | sets a maximum intron size from a preset; by default there is none (an annotated intron is never a reason to drop a read); see `--max-intron` |
+| `--keep-isoform-duplicates` | keep every record the aligner wrote; by default the same genomic alignment of one read from several isoforms is written once (`ta`, `tn` on the survivor) and `NH` is recomputed for the reads affected |
+| `--unique-mapq N` | MAPQ for a read whose placements collapsed to one |
+| `--strand-tag MODE` | `XS:A` and `ts:A` on spliced records (default), all records, or none |
 | `--primary-only` | drop secondary alignments |
 | `--no-pair-restore` | single-end data |
 | `--validate` | extra consistency checks on the output |
@@ -76,13 +79,14 @@ transcripts were found, this is almost always why.
 | dependencies | Python, pysam | none, static binary |
 | versioned vs bare transcript IDs | needs `--strip-version` | automatic |
 | secondary-alignment tag recovery | not implemented | on by default, `--no-recover-secondary-tags` to disable |
+| isoform-duplicate collapse, NH rewrite, strand tags | the same rules, after the sort | the same, at the sorted write |
 | memory ceiling | none; scales with input | `--disk-spill` and `T2GD_CONVERT_BUDGET_MB` give a bounded footprint |
 | output record order | nondeterministic across runs | deterministic |
 | output file bytes | not reproducible | records reproducible, BGZF framing varies |
 | rest of the toolkit | not included | 36 subcommands |
 
 On matched settings the two agree read for read on `QNAME`, `FLAG`, `RNAME`,
-`POS`, `MAPQ` and `CIGAR`. The binary is several times faster; the figures are
+`POS`, `MAPQ` and `CIGAR`, and on `NH`, `ta`, `tn`, `XS` and `ts`. The binary is several times faster; the figures are
 in the paper and in the built-in **Performance and resources** topic.
 
 Output record order being nondeterministic is worth restating, because it

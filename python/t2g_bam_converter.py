@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Transcriptome to Genome BAM Converter - Version 5.7
+Transcriptome to Genome BAM Converter - Version 5.8
 Converts BAM files aligned to transcriptome coordinates to genome coordinates.
 
 Copyright (c) 2026 the T2G authors.
@@ -65,6 +65,10 @@ emitted by BWA, STAR, HISAT2 and Bowtie2:
     de  5' distance from gene end
     es  3' distance from gene start
     ee  3' distance from gene end
+    ta  isoforms a collapsed record stands for (its own first), 5.8
+    tn  their number, 5.8
+    XS  transcript strand on the genome (A), spliced records, 5.8
+    ts  transcript strand relative to the record, minimap2's convention, 5.8
 
 Tags already present on the input record are carried through, including
 array-valued (SAM type B) tags such as ML and pa.  A tag that cannot be written
@@ -716,17 +720,20 @@ class GTFParser:
 
 worker_transcripts = None
 worker_transcript_lookup = None
-worker_max_intron_size = 500_000
+worker_max_intron_size = 0          # 0 = no limit (5.8); was 500_000
+worker_strand_tag = 'spliced'       # 5.8: 'spliced' | 'all' | 'none'
 worker_warn_intron_size = 100_000
 worker_filter_secondary = False
 worker_direct = False
 worker_preserve_cigar_ops = True
 
 
-def init_worker(tx_dict, lookup, max_intron, warn_intron, filt_sec, direct, preserve):
+def init_worker(tx_dict, lookup, max_intron, warn_intron, filt_sec, direct, preserve,
+                strand_tag='spliced'):
     global worker_transcripts, worker_transcript_lookup
     global worker_max_intron_size, worker_warn_intron_size
     global worker_filter_secondary, worker_direct, worker_preserve_cigar_ops
+    global worker_strand_tag
     worker_transcripts = {tid: Transcript(**d) for tid, d in tx_dict.items()}
     worker_transcript_lookup = lookup
     worker_max_intron_size  = max_intron
@@ -734,6 +741,7 @@ def init_worker(tx_dict, lookup, max_intron, warn_intron, filt_sec, direct, pres
     worker_filter_secondary = filt_sec
     worker_direct           = direct
     worker_preserve_cigar_ops = preserve
+    worker_strand_tag         = strand_tag
 
 
 def _get_transcript(tid):
@@ -823,7 +831,8 @@ def convert_read_coordinates(rd, tx):
     for i in range(len(regions) - 1):
         isz = regions[i+1][1] - regions[i][2]
         if isz < 0: return None, None
-        if isz > worker_max_intron_size: return None, f"intron_>{worker_max_intron_size}bp"
+        if worker_max_intron_size and isz > worker_max_intron_size:
+            return None, f"intron_>{worker_max_intron_size}bp"
         if isz > worker_warn_intron_size: warn = f"large_intron_{isz//1000}kb"
         max_intron = max(max_intron, isz)
 
@@ -880,6 +889,22 @@ def convert_read_coordinates(rd, tx):
     ]
     if max_intron > 0:
         conv['tags'].append(('im', max_intron, 'i'))
+
+    # 5.8: strand tags.  XS:A is the transcript's genome strand (the HISAT2,
+    # STAR and TopHat convention, read first by StringTie and never flipped);
+    # ts:A is minimap2's, relative to the record's own orientation, so it is
+    # flipped when the lifted record carries FLAG 0x10.  Neither is written
+    # over an aligner's own XS or ts (bowtie2 writes XS:i, Dorado ts:i).
+    # A spliced record is one whose genome CIGAR carries an N.
+    if worker_strand_tag == 'all' or (worker_strand_tag == 'spliced' and max_intron > 0):
+        if tx.strand in ('+', '-'):
+            present = {t[0] for t in conv['tags']}
+            final_rev = bool((conv['flag'] ^ (0x10 if tx.strand == '-' else 0)) & 0x10)
+            if 'XS' not in present:
+                conv['tags'].append(('XS', tx.strand, 'A'))
+            if 'ts' not in present:
+                conv['tags'].append(('ts', (('-' if tx.strand == '+' else '+') if final_rev
+                                            else tx.strand), 'A'))
 
     if tx.strand == '-':
         conv['flag'] ^= 0x10
@@ -990,8 +1015,9 @@ def _producer_process(task_q, input_bam, batch_size, n_workers):
 
 def _consumer_worker(task_q, res_q, prog_q, worker_id, tmp_path, hdr_dict,
                      min_mapq, tx_data, tx_lookup, max_intron, warn_intron,
-                     filt_sec, direct, preserve):
-    init_worker(tx_data, tx_lookup, max_intron, warn_intron, filt_sec, direct, preserve)
+                     filt_sec, direct, preserve, strand_tag='spliced'):
+    init_worker(tx_data, tx_lookup, max_intron, warn_intron, filt_sec, direct, preserve,
+                strand_tag)
     loc_stats = defaultdict(int)
     loc_miss = set(); loc_warn = Counter(); loc_miss_det = []
     hdr = pysam.AlignmentHeader.from_dict(hdr_dict)
@@ -1076,16 +1102,121 @@ def _deserialize(d, hdr):
     return r
 
 # ---------------------------------------------------------------------------
+# 5.8: isoform multimappers after the lift (the t2gd.multimap module of the
+# binary).  In transcript space an aligner reports a read once per isoform it
+# matches; after the lift many of those records are the same genomic
+# alignment written several times.  Pass 1 keeps one record per (read, mate,
+# strand, CIGAR) inside each (reference, position) run of the coordinate-
+# sorted BAM (the primary if one of them is primary, otherwise the first) and
+# marks the survivor with ta (the isoforms it stands for) and tn (their
+# number).  Pass 2 revisits the reads that lost a record: NH becomes the
+# number of non-supplementary records left, the first survivor is promoted
+# to primary when none survived, and --unique-mapq N sets MAPQ for a read
+# left with one placement.  HI is left as the aligner wrote it.
+# ---------------------------------------------------------------------------
+
+def collapse_isoform_duplicates(input_bam, output_bam, unique_mapq=None):
+    """Both passes over a coordinate-sorted BAM; returns a stats dict."""
+    stats = defaultdict(int)
+    touched = set()                    # (qname, mate bits) that lost a record
+    tmp = output_bam + ".collapse_tmp.bam"
+
+    def dup_key(r):
+        return (r.query_name, r.flag & 0xC0, r.flag & 0x10, r.cigarstring)
+
+    with pysam.AlignmentFile(input_bam, "rb") as bam_in, \
+         pysam.AlignmentFile(tmp, "wb", header=bam_in.header) as out:
+        run = []
+        cur = None
+
+        def flush():
+            winner_of = {}
+            kept = []          # [read, isoforms, dropped]
+            for r in run:
+                k = dup_key(r)
+                primary = (r.flag & 0x900) == 0
+                tx = r.get_tag('tx') if r.has_tag('tx') else ''
+                if k in winner_of:
+                    w = kept[winner_of[k]]
+                    if primary and (w[0].flag & 0x900) != 0:
+                        kept.append([r, [tx] + w[1], False])
+                        w[2] = True
+                        winner_of[k] = len(kept) - 1
+                    else:
+                        w[1].append(tx)
+                        kept.append([r, [tx], True])
+                    stats['removed'] += 1
+                    touched.add((r.query_name, r.flag & 0xC0))
+                else:
+                    kept.append([r, [tx], False])
+                    winner_of[k] = len(kept) - 1
+            for r, isoforms, dropped in kept:
+                if dropped:
+                    continue
+                if len(isoforms) > 1:
+                    r.set_tag('ta', ','.join(isoforms), 'Z')
+                    r.set_tag('tn', len(isoforms), 'i')
+                    stats['merged'] += 1
+                out.write(r)
+
+        for read in bam_in.fetch(until_eof=True):
+            stats['seen'] += 1
+            k = (read.reference_id, read.reference_start)
+            if k != cur:
+                flush()
+                run = []
+                cur = k
+            run.append(read)
+        flush()
+
+    stats['groups_touched'] = len(touched)
+    if not touched:
+        os.replace(tmp, output_bam)
+        return dict(stats)
+
+    agg = {}                           # (qname, mate) -> [survivors, has_primary, promoted]
+    with pysam.AlignmentFile(tmp, "rb") as b:
+        for read in b.fetch(until_eof=True):
+            g = (read.query_name, read.flag & 0xC0)
+            if g in touched:
+                a = agg.setdefault(g, [0, False, False])
+                if not read.is_supplementary:
+                    a[0] += 1
+                    if not read.is_secondary:
+                        a[1] = True
+    with pysam.AlignmentFile(tmp, "rb") as b, \
+         pysam.AlignmentFile(output_bam, "wb", header=b.header) as out:
+        for read in b.fetch(until_eof=True):
+            a = agg.get((read.query_name, read.flag & 0xC0))
+            if a is not None:
+                if a[0] > 0:
+                    read.set_tag('NH', a[0], 'i')
+                    stats['nh_rewritten'] += 1
+                if not a[1] and not read.is_supplementary and not a[2]:
+                    read.flag &= ~0x100
+                    a[2] = True
+                    stats['promoted'] += 1
+                if (unique_mapq is not None and a[0] == 1 and not read.is_supplementary
+                        and read.mapping_quality != unique_mapq):
+                    read.mapping_quality = unique_mapq
+                    stats['mapq_reassigned'] += 1
+            out.write(read)
+    os.remove(tmp)
+    return dict(stats)
+
+
+# ---------------------------------------------------------------------------
 # ParallelConverter — main orchestrator
 # ---------------------------------------------------------------------------
 
 class ParallelConverter:
 
     def __init__(self, gtf_parser, threads=1, batch_size=500, min_mapq=0,
-                 max_intron_size=500_000, warn_intron_size=100_000,
+                 max_intron_size=0, warn_intron_size=100_000,
                  chrom_sizes=None, low_memory=False, parallel_write=False,
                  filter_secondary=False, direct=False, preserve_cigar_ops=True,
-                 validate_mode=False, pair_config=None):
+                 validate_mode=False, pair_config=None,
+                 strand_tag='spliced', collapse_isoforms=True, unique_mapq=None):
         self.gtf_parser       = gtf_parser
         self.threads          = threads
         self.batch_size       = batch_size
@@ -1099,6 +1230,9 @@ class ParallelConverter:
         self.preserve_cigar_ops = preserve_cigar_ops
         self.validate_mode    = validate_mode
         self.pair_config      = pair_config
+        self.strand_tag       = strand_tag        # 5.8
+        self.collapse_isoforms = collapse_isoforms  # 5.8
+        self.unique_mapq      = unique_mapq       # 5.8
 
     # ---------------------------------------------------------------- public API
 
@@ -1139,7 +1273,7 @@ class ParallelConverter:
                    for c in sorted(chrom_maxpos)]
         d.setdefault('PG', []).append({'ID': 't2g_converter',
                                         'PN': 'transcriptome_to_genome_converter',
-                                        'VN': '5.7', 'CL': ' '.join(sys.argv)})
+                                        'VN': '5.8', 'CL': ' '.join(sys.argv)})
         return pysam.AlignmentHeader.from_dict(d)
 
     def _run_pair_restoration(self, bam_path):
@@ -1149,6 +1283,24 @@ class ParallelConverter:
         stats = PairRestorator(self.pair_config).restore_pairs(bam_path, tmp)
         os.replace(tmp, bam_path)
         return stats
+
+    def _run_collapse(self, bam_path):
+        if not self.collapse_isoforms: return {}
+        logger.info("Collapsing isoform duplicates …")
+        tmp = bam_path + ".collapsed.bam"
+        st = collapse_isoform_duplicates(bam_path, tmp, self.unique_mapq)
+        os.replace(tmp, bam_path)
+        return st
+
+    def _report_collapse_stats(self, cs):
+        if not cs: return
+        logger.info("\nIsoform duplicates:")
+        logger.info(f"  Records seen              : {cs.get('seen',0):,}")
+        logger.info(f"  Duplicates removed        : {cs.get('removed',0):,}")
+        logger.info(f"  Reads affected            : {cs.get('groups_touched',0):,}")
+        logger.info(f"  NH recomputed             : {cs.get('nh_rewritten',0):,}")
+        logger.info(f"  Promoted to primary       : {cs.get('promoted',0):,}")
+        logger.info(f"  MAPQ set by --unique-mapq : {cs.get('mapq_reassigned',0):,}")
 
     def _report_pair_stats(self, ps):
         if not ps: return
@@ -1203,7 +1355,7 @@ class ParallelConverter:
                            args=(task_q, res_q, prog_q, i, tmp_bam, new_hdr.to_dict(),
                                  self.min_mapq, tx_data, tx_lookup, self.max_intron_size,
                                  self.warn_intron_size, self.filter_secondary,
-                                 self.direct, self.preserve_cigar_ops))
+                                 self.direct, self.preserve_cigar_ops, self.strand_tag))
             p.start(); consumers.append(p)
 
         pbar = mon_thread = None
@@ -1238,17 +1390,31 @@ class ParallelConverter:
             with pysam.AlignmentFile(output_bam, "wb", header=new_hdr): pass
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        pair_stats = self._run_pair_restoration(output_bam)
-
+        # 5.8: the order mirrors the binary: sort, collapse isoform duplicates
+        # (the collapse needs the sorted stream), restore pairs, sort again
+        # (pair restoration writes pairs as they complete), index.
+        collapse_stats = {}
         if sort_output and os.path.getsize(output_bam) > 0:
             logger.info("Sorting …")
             tmp_s = output_bam + ".sort.bam"
             pysam.sort("-@", str(self.threads), "-o", tmp_s, output_bam)
             os.replace(tmp_s, output_bam)
-        if os.path.getsize(output_bam) > 0:
+            collapse_stats = self._run_collapse(output_bam)
+        elif self.collapse_isoforms:
+            logger.warning("--no-sort: isoform duplicates are not collapsed "
+                           "(the collapse needs a coordinate-sorted output)")
+
+        pair_stats = self._run_pair_restoration(output_bam)
+
+        if sort_output and pair_stats and os.path.getsize(output_bam) > 0:
+            tmp_s = output_bam + ".sort.bam"
+            pysam.sort("-@", str(self.threads), "-o", tmp_s, output_bam)
+            os.replace(tmp_s, output_bam)
+        if sort_output and os.path.getsize(output_bam) > 0:
             pysam.index(output_bam)
 
         self._report_stats(g_stats, g_miss, g_warn, miss_stats, start)
+        self._report_collapse_stats(collapse_stats)
         self._report_pair_stats(pair_stats)
 
     def _run_streaming(self, input_bam, output_bam, sort_output):
@@ -1272,7 +1438,8 @@ class ParallelConverter:
             with mp.Pool(processes=self.threads, initializer=init_worker,
                          initargs=(tx_data, tx_lookup, self.max_intron_size,
                                    self.warn_intron_size, self.filter_secondary,
-                                   self.direct, self.preserve_cigar_ops)) as pool:
+                                   self.direct, self.preserve_cigar_ops,
+                                   self.strand_tag)) as pool:
                 pbar = tqdm(total=total, desc="Converting", unit=" reads") if TQDM_AVAILABLE and total else None
                 try:
                     for res in pool.imap_unordered(process_read_batch,
@@ -1287,14 +1454,30 @@ class ParallelConverter:
                 finally:
                     if pbar: pbar.close()
 
-        pair_stats = self._run_pair_restoration(tmp_bam)
+        # 5.8: sort, collapse, restore pairs, sort again, index (as above).
+        collapse_stats = {}
+        if sort_output:
+            logger.info("Sorting …")
+            pysam.sort("-@", str(self.threads), "-o", output_bam, tmp_bam)
+            os.remove(tmp_bam)
+            collapse_stats = self._run_collapse(output_bam)
+        else:
+            os.replace(tmp_bam, output_bam)
+            if self.collapse_isoforms:
+                logger.warning("--no-sort: isoform duplicates are not collapsed "
+                               "(the collapse needs a coordinate-sorted output)")
 
-        logger.info("Sorting …")
-        pysam.sort("-@", str(self.threads), "-o", output_bam, tmp_bam)
-        os.remove(tmp_bam)
-        pysam.index(output_bam)
+        pair_stats = self._run_pair_restoration(output_bam)
+
+        if sort_output:
+            if pair_stats:
+                tmp_s = output_bam + ".sort.bam"
+                pysam.sort("-@", str(self.threads), "-o", tmp_s, output_bam)
+                os.replace(tmp_s, output_bam)
+            pysam.index(output_bam)
 
         self._report_stats(stats, g_miss, g_warn, miss_stats, start)
+        self._report_collapse_stats(collapse_stats)
         self._report_pair_stats(pair_stats)
 
     def _batches(self, input_bam):
@@ -1438,8 +1621,19 @@ Multimapper pairing
     p.add_argument('--min-mapq', type=int, default=0)
     ig = p.add_mutually_exclusive_group()
     ig.add_argument('--species', choices=list(SPECIES_INTRON_SIZES))
-    ig.add_argument('--max-intron', type=int, default=500_000)
+    ig.add_argument('--max-intron', type=int, default=0,
+                    help='skip reads with any intron larger than this; 0 (the default) '
+                         'is no limit: an annotated intron is never a reason to drop a read')
     p.add_argument('--warn-intron', type=int, default=100_000)
+    p.add_argument('--strand-tag', choices=['spliced', 'all', 'none'], default='spliced',
+                   help='write XS:A (genome strand) and ts:A (minimap2 convention) on '
+                        'spliced records (default), all records, or none')
+    p.add_argument('--keep-isoform-duplicates', action='store_true',
+                   help='keep every record the aligner wrote; by default the same genomic '
+                        'alignment of one read from several isoforms is written once and '
+                        'NH is recomputed for the reads affected')
+    p.add_argument('--unique-mapq', type=int, default=None,
+                   help='MAPQ (0..254) for a read whose placements collapsed to one')
     p.add_argument('--chrom-sizes')
     p.add_argument('--strip-version', action='store_true')
     p.add_argument('--no-sort', action='store_true')
@@ -1462,12 +1656,14 @@ Multimapper pairing
                     help='TSV file with one row per restored pair')
 
     p.add_argument('-v','--verbose', action='store_true')
-    p.add_argument('--version', action='version', version='%(prog)s 5.7')
+    p.add_argument('--version', action='version', version='%(prog)s 5.8')
 
     args = p.parse_args()
 
     if args.input_bam and not args.output_bam:
         p.error("-o required with -i")
+    if args.unique_mapq is not None and not (0 <= args.unique_mapq <= 254):
+        p.error("--unique-mapq must be between 0 and 254")
     if args.directory and args.output_bam:
         p.error("-o cannot be used with -d")
 
@@ -1476,7 +1672,7 @@ Multimapper pairing
         format='%(asctime)s  %(levelname)s  %(message)s',
         datefmt='%H:%M:%S')
 
-    logger.info("t2g BAM converter v5.7")
+    logger.info("t2g BAM converter v5.8")
     logger.info(f"CPU cores: {mp.cpu_count()},  threads: {args.threads}")
 
     if args.species:
@@ -1508,7 +1704,10 @@ Multimapper pairing
                   parallel_write=args.parallel_write,
                   filter_secondary=args.primary_only, direct=args.direct_only,
                   preserve_cigar_ops=not args.no_preserve_cigar,
-                  validate_mode=args.validate, pair_config=pair_cfg)
+                  validate_mode=args.validate, pair_config=pair_cfg,
+                  strand_tag=args.strand_tag,
+                  collapse_isoforms=not args.keep_isoform_duplicates,
+                  unique_mapq=args.unique_mapq)
 
         if args.directory:
             batch_convert_directory(gtf, args.directory,

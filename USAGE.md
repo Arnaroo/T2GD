@@ -28,26 +28,34 @@ t2gd-cli convert -g annotation.gtf -i reads.tx.bam -o reads.genome.bam -t 8
 ```
 
 That is the whole conversion. Leave `-t` off and the profiler picks a thread
-count from the input size and the machine.
+count from the input size and the machine; on a machine with many cores give
+`-t 8` instead (see [Threads](#threads)).
 
-The run prints a progress line with an ETA, then a summary table:
+Since 1.22.0 the defaults write isoform duplicates once, put `XS:A` and `ts:A`
+on every spliced record, and drop no read for the size of an annotated intron.
+[Isoform duplicates and strand tags](#isoform-duplicates-and-strand-tags) gives
+the flags, including the three that restore 1.19.1's records.
+
+The run prints a progress line with an ETA, then a summary table, which
+begins:
 
 ```
-| Metric                       | Records |
-| Read from input              |  60,000 |
-| Written to output            |  59,886 |
-| Skipped: unmapped            |       0 |
-| Skipped: filtered out        |       0 |
-| Skipped: no transcript model |       0 |
-| Skipped: conversion failed   |     114 |
-| Warned: large intron         |       0 |
+| Metric                        | Records |
+| Read from input               |  60,000 |
+| Written to output             |  59,886 |
+| Collapsed: isoform duplicates |       0 |
+| Skipped: unmapped             |       0 |
+| Skipped: filtered out         |       0 |
+| Skipped: no transcript model  |       0 |
+| Skipped: conversion failed    |     114 |
+| Warned: large intron          |       0 |
 ```
 
 Add `--explain` and T2GD prints, underneath the table, what each row counts
 and what a healthy value looks like.
 
-The output is already sorted by genome coordinate, so it can be indexed
-straight away:
+The output is already sorted by genome coordinate, paired output included, so
+it can be indexed straight away:
 
 ```sh
 t2gd-cli index reads.genome.bam
@@ -93,16 +101,25 @@ coordinates, indexed and checked:
 
 ```sh
 t2gd-cli convert -g gencode.v44.gtf -i drs.tx.bam -o drs.genome.bam \
-    -t 8 --species human --strip-version
+    -t 8 --threads-bgzf 8 --strip-version
 t2gd-cli index drs.genome.bam
 t2gd-cli flagstat drs.genome.bam
 t2gd-cli validate -g gencode.v44.gtf -i drs.genome.bam --strip-version
 ```
 
 `--strip-version` is almost always needed with GENCODE, because the
-transcriptome FASTA and the GTF disagree about version suffixes.
-`--species human` sets the maximum implied intron to 500,000 bp, which is
-already the default but makes the intent explicit in a script.
+transcriptome FASTA and the GTF disagree about version suffixes. No intron
+limit is set: since 1.22.0 a read is not dropped for the size of an annotated
+intron, and `--species human` would bring back the 500,000 bp limit earlier
+versions applied by default.
+
+minimap2 reports a direct RNA read once for every isoform it matches, so many
+of its transcript-space records are the same genomic alignment after the lift.
+By default each is written once, with `ta` and `tn` naming and counting the
+isoforms it stands for, and `NH` recomputed for the reads that lost records.
+minimap2 gives a read that matches several isoforms MAPQ 0, and the collapse
+keeps the aligner's MAPQ, so a read left with one placement still has MAPQ 0;
+`--unique-mapq 60` marks such reads as unique.
 
 Base modification calls survive conversion. `MM` and `ML` are copied through
 unchanged, including on reverse-strand transcripts where the record is
@@ -309,13 +326,37 @@ machine. These are for when it is not.
 
 ### Threads
 
-Four threads is close to the sweet spot on every dataset measured. There is
-no benefit above 16 and a measurable penalty above that. If you have a whole
-node and many files, run several conversions at 4 threads each rather than
-one at 32.
+For one conversion at a time, give eight worker threads with as many BGZF
+threads, on eight cores reserved for the job, of one socket where possible. A
+cluster allocation of eight cores enforces this; on a whole node, `taskset`
+does:
 
-On a shared node the profiler sees the whole machine, not your allocation, so
-set `-t` to your actual CPU allocation rather than trusting the default.
+```sh
+taskset -c 0-7 t2gd-cli convert -g annotation.gtf -i reads.tx.bam \
+    -o reads.genome.bam -t 8 --threads-bgzf 8
+```
+
+That was the fastest setting measured for 1.22.0, on nodes of two 48-core AMD
+EPYC 9474F, on 3.5 million direct RNA and 11 million paired-end records.
+Restricted to as many cores as threads, every input ran fastest on eight
+threads, 2.7 to 3.0 times faster than on one, and no sixteen-thread run was
+faster than eight threads on one die. The time to compress and write the output
+halved at every doubling; the conversion and mate-matching passes stopped
+gaining at eight. With `-t` alone on a whole 96-core node, where the process
+could reach every core, the same lifts took up to 2.2 times as long: the more
+processors a run can spread over, and the farther apart they are, the slower it
+is.
+
+The default worker count is the number of processors the process may use (its
+CPU affinity, so a cluster allocation or `taskset` counts) less two. On a whole
+large node that is far past eight, so give `-t`. With a whole node and many
+files, run several conversions at eight threads, each restricted to its own
+eight cores, rather than one at many more.
+
+Turning tag recovery off (`--no-recover-secondary-tags`) cut the direct RNA
+conversion to about a third of its time with eight threads on eight cores, at
+the price described under
+[Fidelity of the converted record](#fidelity-of-the-converted-record).
 
 ### Memory
 
@@ -411,9 +452,13 @@ order-agnostic.
 
 ## The tags T2GD writes
 
-T2GD writes only lowercase two-character tags. The SAM specification reserves
-that space for end-user applications, so nothing it adds can collide with a
-standard tag. Existing tags on the input record are carried through untouched.
+T2GD's own tags are lowercase two-character tags, a space the SAM
+specification reserves for end-user applications, so nothing it adds can
+collide with a standard tag. The one exception is `XS:A`, in the X space the
+specification reserves the same way, written in the convention HISAT2 and STAR
+use. Existing tags on the input record are carried through untouched, except
+`NH`, which is recomputed for a read that lost records to the collapse of
+isoform duplicates.
 
 `convert` writes these on every successfully converted record:
 
@@ -432,6 +477,18 @@ standard tag. Existing tags on the input record are carried through untouched.
 | `de` | i | distance from the read's 5' end to the gene's 3' end |
 | `es` | i | distance from the gene's 5' end to the read's 3' end |
 | `ee` | i | distance from the read's 3' end to the gene's 3' end |
+
+And on some records:
+
+| Tag | Type | Meaning |
+|---|---|---|
+| `XS` | A | the transcript's strand on the genome, `+` or `-`, on spliced records (`--strand-tag`) |
+| `ts` | A | the same strand relative to the record's own orientation, minimap2's convention, beside `XS` |
+| `ta` | Z | on a record that stands for isoform duplicates: the isoforms, its own first |
+| `tn` | i | beside `ta`: their number |
+
+Neither `XS` nor `ts` is written over a tag of that name the aligner already
+wrote (bowtie2's `XS:i`, Dorado's `ts:i`).
 
 `pk` is written by pair restoration: 0 for a singleton, 1 for a pair on the
 same transcript, 2 for a pair across transcripts. Twenty more tags come from
@@ -489,11 +546,11 @@ or `--gene-list`/`--tx-list` restricting the run more than intended.
 
 ## Other things that go wrong
 
-**A high `intron_too_large` count.** The default maximum implied intron is
-500,000 bp, which is right for human and wrong for other organisms. Use
-`--species mouse` (240,000), `--species drosophila` (100,000) or
-`--species yeast` (2,000), or set `--max-intron` directly. Some plant and fish
-genomes need more than a million. A small number of these is normal.
+**A high `intron_too_large` count.** Since 1.22.0 there is no intron limit
+unless you set one, with `--max-intron` or a `--species` preset (human, mouse
+and zebrafish 500,000; plant 750,000; fly or drosophila 100,000; worm 50,000;
+yeast 5,000). The intron comes from the annotation, so its size is no evidence
+against the read, and the usual fix is to drop the limit.
 
 **The GTF produced no transcripts.** The annotation parsed but contained
 nothing usable. Check it is a GTF and not a GFF3, that it has `exon` feature
@@ -533,6 +590,8 @@ These are accepted before or after the subcommand.
 | `--quiet` | suppress everything except errors |
 | `--log-file PATH` | write the run log to a file as well as the console. Give a directory and the name is generated as `t2gd_<subcommand>_<timestamp>_run.log` |
 | `--log-verbosity 0..3` | detail level of the file log, set independently of the console: 0 warnings, 1 info, 2 phases, 3 debug |
+| `--no-pg` | write no `@PG` line, so that two runs differing only in their output path give the same bytes. `@PG` lines already in the input are kept |
+| `--pg-id ID` | stamp the `@PG` line under this ID instead of the subcommand's default |
 
 So a quiet console with a full log on disk is `--quiet --log-file run.log
 --log-verbosity 3`, which is the arrangement to want in a batch job.
@@ -547,6 +606,7 @@ There are also info flags, which print and exit:
 | `--about` | the project description |
 | `--license` | the binary licence |
 | `--list-known-summary-fields` | the MinKNOW column to BAM tag table |
+| `--list-commands` | every subcommand, one per line |
 | `-h`, `--help` | the subcommand index, or one command's reference |
 
 ### convert
@@ -575,17 +635,17 @@ Every skip is counted and reported by reason. Nothing is dropped silently.
 
 | Flag | Meaning |
 |---|---|
-| `--max-intron BP` | skip a read if converting it would imply an intron longer than this. Default 500,000 |
+| `--max-intron BP` | skip a read if converting it would imply an intron longer than this. Default 0, no limit (500,000 before 1.22.0) |
 | `--warn-intron BP` | warn, but keep, above this. Default 100,000 |
-| `--species NAME` | a preset for `--max-intron`: human 500,000, mouse 240,000, drosophila 100,000, yeast 2,000 |
+| `--species NAME` | a preset for `--max-intron`: human, mouse and zebrafish 500,000; plant 750,000; fly or drosophila 100,000; worm 50,000; yeast 5,000. An explicit `--max-intron` wins |
 | `--min-mapq N` | skip reads below this mapping quality. Default 0, which keeps everything |
 | `--primary-only` | drop secondary and supplementary alignments |
 | `--direct-only` | drop reads on minus-strand transcripts, so nothing is reverse-complemented |
 
-The intron limit is the one that catches people out. It is not a property of
-the read, it is a property of the transcript model: a read spanning an exon
-junction implies the intron between them. Set it for your organism, not for
-your read length.
+An intron limit is not a property of the read but of the transcript model: a
+read spanning an exon junction implies the intron between them, so its size is
+no evidence against the read. That is why 1.22.0 sets none by default. Set one
+only to filter on purpose.
 
 #### Restricting the run
 
@@ -636,6 +696,30 @@ which is also the setting that reproduces the Python reference implementation's
 output byte for byte. If your data has no base modification tags it costs you
 nothing to turn off. It is skipped automatically under `--primary-only`.
 
+#### Isoform duplicates and strand tags
+
+| Flag | Meaning |
+|---|---|
+| `--keep-isoform-duplicates` | keep every record the aligner wrote. By default the same genomic alignment of one read, reported once per isoform, is written once |
+| `--unique-mapq N` | MAPQ for a read whose placements collapsed to one, 0 to 254. By default the aligner's MAPQ is kept |
+| `--strand-tag MODE` | `spliced` (the default) writes `XS:A` and `ts:A` on records whose genome CIGAR has an `N`; `all` on every record; `none` on none |
+
+Two records of one read are duplicates when they lift to the same chromosome,
+position, strand and CIGAR, the same mate if paired. The record that stays is
+the primary when one of them is primary, otherwise the first, and carries `ta`
+and `tn`. For every read that lost a record, `NH` is recomputed as the number of
+non-supplementary records left, and when no primary survived (the aligner's
+primary was on a transcript the annotation lacks) the first record left becomes
+primary. `HI` is left as the aligner wrote it. MAPQ is kept because aligners
+use different scales (bowtie2 tops at 42, minimap2 at 60, STAR at 255), so no
+single recomputed value suits them all. The pass needs the sorted output, so
+`--no-sort` turns it off, with a warning.
+
+To get the records 1.19.1 wrote, give
+`--keep-isoform-duplicates --strand-tag none --max-intron 500000`. Paired
+output then holds the same records in coordinate order, where 1.19.1 wrote
+them out of order.
+
 #### Pair restoration
 
 Transcriptome alignment loses mate information, because the two mates become
@@ -650,6 +734,11 @@ separate alignments. Restoration is on by default and needs name-grouped input.
 | `--pair-summary PATH` | a TSV summary of what was restored |
 | `--pair-in-memory` | ask for the in-memory matcher |
 | `--pair-streaming` | force the streaming matcher, which is what `lowmem` uses |
+
+Since 1.22.0 the paired output is coordinate-sorted, as its `@HD SO:coordinate`
+line says, so `samtools index` and `t2gd-cli index` take it directly; earlier
+versions wrote each pair when its second mate arrived. `--no-sort` leaves it
+unsorted, and its header then says `SO:unsorted`.
 
 #### MinKNOW tag injection
 
@@ -759,7 +848,7 @@ where the bytes will differ but the alignments should not.
 
 | Command | What it does | The flags that matter |
 |---|---|---|
-| `fastq` | reads to FASTQ | `-1`/`-2`/`-0`/`-s` route mates and singletons, `-f`/`-F` FLAG filters, `-n`/`-N` control the `/1` `/2` suffix |
+| `fastq` | reads to FASTQ | `-1`/`-2`/`-0`/`-s` route mates and singletons, `-f`/`-F` FLAG filters, `-n`/`-N` control the `/1` `/2` suffix, `-T TAG[,TAG...]` copies aux tags onto the name line as `samtools fastq -T` does (`'*'` for all), which is how `MM` and `ML` reach `minimap2 -y` |
 | `fasta` | the same to FASTA | as above |
 | `faidx` | build a `.fai`, or fetch a subsequence | regions are 1-based inclusive, `NAME:START-END` |
 | `dict` | a sequence dictionary for a FASTA | `-a` assembly, `-s` species, `-u` URI |
@@ -773,7 +862,7 @@ records sharing a name.
 
 | Command | What it does | The flags that matter |
 |---|---|---|
-| `sort` | coordinate or queryname sort | `-n` by name, `--ram-mb` chunk budget, `--tmp-dir`, `--index` build the `.bai` too |
+| `sort` | coordinate or queryname sort; takes SAM text on `-i` as well as BAM | `-n` by name, `--ram-mb` chunk budget, `--tmp-dir`, `--index` build the `.bai` too |
 | `index` | build a `.bai` | `-o` output path |
 | `calmd` | recompute `MD` and `NM` against a reference | `-b` write BAM, needs `-o` |
 | `fixmate` | repair mate fields | `-r` drop unmapped and non-primary, `-m` add the `ms` tag. Input must be name grouped |
